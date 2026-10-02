@@ -12,22 +12,37 @@ from .answers import resolve,REFUSE
 from .discovery import ATS_HOSTS,PORTAL_HOSTS
 from .util import Blocked,digest,private_dir,public_host,safe_document
 
+UPLOAD_HOSTS={'grnhse-prod-jben-us-west-2.s3.us-west-2.amazonaws.com',
+              'grnhse-prod-jben-us-east-1.s3.us-east-1.amazonaws.com',
+              'grnhse-prod-jben-eu-west-1.s3.eu-west-1.amazonaws.com'}
 CONTROLS='input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select,[role=combobox]:not(input):not(select)'
 SNAPSHOT=r"""selector => {
  const controls=Array.from(document.querySelectorAll(selector)); const out=[]; const seen=new Set();
+ function labelText(n) {
+  if(!n)return '';const copy=n.cloneNode(true);
+  copy.querySelectorAll('input,select,textarea,button,[role=combobox]').forEach(x=>x.remove());
+  return copy.textContent.trim();
+ }
+ function reference(el) {return {id:el.id||'',name:el.name||'',tag:el.tagName.toLowerCase()};}
  function label(el) {
   const ids=(el.getAttribute('aria-labelledby')||'').split(/\s+/).filter(Boolean);
   const aria=ids.map(id=>document.getElementById(id)?.innerText||'').join(' ').trim();
-  const direct=Array.from(el.labels||[]).map(x=>x.innerText).join(' ').trim();
+  const direct=Array.from(el.labels||[]).map(labelText).join(' ').trim();
   const field=el.closest('fieldset'); const legend=field?.querySelector('legend')?.innerText;
   const wrapper=el.closest('[class*=form-field],[class*=field-entry],[class*=application-question],.field');
-  return (el.getAttribute('aria-label')||aria||legend||direct||wrapper?.querySelector('label')?.innerText||el.getAttribute('placeholder')||'').trim();
+  return (el.getAttribute('aria-label')||aria||direct||legend||labelText(wrapper?.querySelector('label'))||el.getAttribute('placeholder')||'').trim();
  }
  controls.forEach((el,index)=>{
   if(!el.getClientRects().length && el.type!=='file')return;
-  if(el.disabled)return;
+  if(el.disabled || el.closest('[aria-hidden=true]') || (el.readOnly && el.tabIndex<0))return;
   let type=el.tagName==='SELECT'?'select':el.tagName==='TEXTAREA'?'textarea':el.getAttribute('role')==='combobox'?'combobox':el.type||'text';
   let indices=[index]; let question=label(el); let options=[]; let value=el.value||'';
+  if(type==='file'){
+   const identity=(el.id+' '+el.name).toLowerCase();
+   if(/transcript/.test(identity))question='Transcript';
+   else if(/resume|\bcv\b/.test(identity))question='Resume/CV';
+   else if(/cover.?letter/.test(identity))question='Cover letter';
+  }
   if(type==='radio'){
    const name=el.name; if(!name||seen.has(name))return;seen.add(name);
    const group=controls.filter(x=>x.type==='radio'&&x.name===name);
@@ -36,7 +51,7 @@ SNAPSHOT=r"""selector => {
    value=group.find(x=>x.checked)?.value||'';
   }else if(type==='select'){options=Array.from(el.options).filter(o=>o.value&&!o.disabled).map(o=>o.textContent.trim())}
   else if(type==='checkbox'){options=['Yes','No'];value=el.checked?'Yes':'No'}
-  out.push({index,indices,label:question.replace(/\s+/g,' ').trim(),type,options,
+  out.push({index,indices,ref:reference(el),refs:indices.map(i=>reference(controls[i])),label:question.replace(/\s+/g,' ').trim(),type,options,
    required:el.required||el.getAttribute('aria-required')==='true'||/\*/.test(question),
    maxlength:el.maxLength||-1,value,multiple:!!el.multiple});
  });return out;
@@ -48,7 +63,7 @@ LOGIN=re.compile(r"sign in to (?:apply|continue)|log in to (?:apply|continue)|cr
 class Browser:
     def __init__(self,store,test_url=None):
         self.store=store; self.test_url=test_url; self.context=None; self.playwright=None
-        self.page=None; self.aid=None; self.attempted=False; self.current_host=""; self.host_cache={}; self.denied_write=False
+        self.page=None; self.aid=None; self.attempted=False; self.current_host=""; self.host_cache={}; self.denied_write=False; self.upload_payloads={}; self.uploaded_files=set()
 
     def __enter__(self):
         from playwright.sync_api import sync_playwright
@@ -65,6 +80,7 @@ class Browser:
         for p in self.context.pages:
             if p!=self.page:p.close()
         self.context.on("page",lambda p:p.close() if p!=self.page else None)
+        self.page.on("response",self._upload_response)
         self.page.on("dialog",lambda d:d.dismiss())
         self.page.on("download",lambda d:d.cancel())
         return self
@@ -81,13 +97,22 @@ class Browser:
         if p.scheme!="https" or not host or p.port not in (None,443):return route.abort()
         if host not in self.host_cache:self.host_cache[host]=public_host(host)
         if not self.host_cache[host]:return route.abort()
+        if host in UPLOAD_HOSTS:
+            payload=getattr(route.request,'post_data_buffer',None) or b''
+            approved=self.current_host in {'boards.greenhouse.io','job-boards.greenhouse.io','boards.eu.greenhouse.io','job-boards.eu.greenhouse.io'} and route.request.method=='POST' and any(data in payload or h.encode() in payload for h,data in self.upload_payloads.items())
+            return route.continue_() if approved else route.abort()
         # No arbitrary website can receive personal values through an injected pixel or redirect.
         asset_hosts={"www.google.com","www.gstatic.com","fonts.googleapis.com","fonts.gstatic.com",
           "www.recaptcha.net","recaptcha.google.com","cdn.jsdelivr.net","cdnjs.cloudflare.com",
-          "static.ashbyhq.com","api.ashbyhq.com","storage.googleapis.com","cdn.greenhouse.io",
-          "boards-api.greenhouse.io","boards.cdn.greenhouse.io","api.lever.co","static.lever.co",
-          "lever-client-assets.s3.amazonaws.com","assets.workable.com","apply.workable.com"}
-        if host not in {self.current_host}|asset_hosts:return route.abort()
+          "static.ashbyhq.com","api.ashbyhq.com","app.ashbyhq.com","cdn.ashbyprd.com","storage.googleapis.com","cdn.greenhouse.io",
+          "job-boards.cdn.greenhouse.io","job-boards.eu.cdn.greenhouse.io",
+          "boards-api.greenhouse.io","boards.cdn.greenhouse.io","email-address-validator.us.greenhouse.io","email-address-validator.eu.greenhouse.io","api.lever.co","static.lever.co",
+          "cdn.lever.co","lever-client-assets.s3.amazonaws.com","lever-client-logos.s3.us-west-2.amazonaws.com",
+          "assets.workable.com","apply.workable.com"}
+        recruiting_asset=bool(re.fullmatch(r"s[0-9]+-recruiting\.cdn\.greenhouse\.io",host))
+        family={self.current_host}
+        if 'greenhouse.io' in self.current_host:family|={'boards.greenhouse.io','job-boards.greenhouse.io','boards.eu.greenhouse.io','job-boards.eu.greenhouse.io'}
+        if host not in family|asset_hosts and not recruiting_asset:return route.abort()
         # Pages may read their standard assets; form writes stay on the current ATS family.
         if route.request.method not in ("GET","HEAD","OPTIONS"):
             allowed={self.current_host}
@@ -107,11 +132,29 @@ class Browser:
                     reading=all(isinstance(q,dict) and isinstance(q.get('query'),str) and re.match(r'^\s*query\b',q['query']) for q in queries)
                 except (ValueError,TypeError):pass
                 # Upload-only requests are permitted on known ATS upload paths, never arbitrary mutations.
+                reading=reading or p.path=='/uncacheable_attributes/presigned_fields'
+                passive_check=p.path.startswith("/cdn-cgi/challenge-platform/")
                 uploading=bool(re.search(r'/(?:upload|uploads|files|attachments|documents)(?:/|\?|$)',p.path,re.I))
-                if not reading and not uploading:
+                if not reading and not uploading and not passive_check:
                     self.denied_write=True
                     return route.abort()
         return route.continue_()
+
+    def _upload_response(self,response):
+        request=response.request
+        if request.method!='POST' or urlsplit(request.url).hostname not in UPLOAD_HOSTS or not 200<=response.status<300:return
+        payload=request.post_data_buffer or b''
+        for h,data in self.upload_payloads.items():
+            if data in payload or h.encode() in payload:self.uploaded_files.add(h)
+
+    def _wait_ready(self):
+        self.page.wait_for_function("""() => document.body &&
+          !document.querySelector('[aria-busy="true"]') &&
+          (document.querySelector('form,input:not([type=hidden]),textarea,select') ||
+           Array.from(document.querySelectorAll('a,button')).some(e=>/^apply/i.test(e.textContent.trim())) ||
+           /no longer|expired|sign in|log in|captcha/i.test(document.body.innerText))""",timeout=20000)
+        # Network idle is a bounded hydration aid, not a requirement on analytics-heavy sites.
+        with contextlib.suppress(Exception):self.page.wait_for_load_state('networkidle',timeout=4000)
 
     def _guard(self,job):
         if self.denied_write:raise Blocked("unapproved_draft_write","An unsupported page attempted to save data before submit authorization")
@@ -133,58 +176,114 @@ class Browser:
         # Custom dropdown option enumeration is a read task, before any personal value is filled.
         for f in fields:
             if f['type']=='combobox':
-                el=self.page.locator(CONTROLS).nth(f['index'])
+                el=self._control(f)
                 try:
                     el.click(); self.page.wait_for_timeout(200)
-                    f['options']=[x.strip() for x in self.page.get_by_role('option').all_text_contents() if x.strip()]
+                    menu=self._menu(el)
+                    f['options']=[x.strip() for x in menu.get_by_role('option').all_text_contents() if x.strip()]
+                    selected=[x.strip() for x in menu.get_by_role('option',selected=True).all_text_contents() if x.strip()]
+                    if len(selected)==1:f['value']=selected[0]
+                    elif not f['value']:
+                        f['value']=el.evaluate("""e=>{
+                          for(let n=e.parentElement,depth=0;n&&depth<5;n=n.parentElement,depth++){
+                            const values=n.querySelectorAll('[class*=singleValue],[class*=single-value]');
+                            if(values.length===1){
+                              const flag=values[0].querySelector('[class*=iti__flag]');
+                              const code=flag&&Array.from(flag.classList).find(c=>/^iti__[a-z]{2}$/.test(c));
+                              if(code){
+                                const menu=document.getElementById(e.getAttribute('aria-controls'));
+                                const options=Array.from((menu||document).querySelectorAll('[role=option]')).filter(o=>o.getClientRects().length&&o.querySelector('.'+code));
+                                if(options.length===1)return options[0].textContent.trim();
+                              }
+                              return values[0].textContent.trim();
+                            }
+                          }return e.textContent.trim();}""")
                     el.press('Escape')
                 except Exception:raise Blocked('unsupported_widget',f['label'])
         return fields
 
     @staticmethod
     def _shape(fields):
-        return [{k:v for k,v in f.items() if k!='value'} for f in fields]
+        return [{k:v for k,v in f.items() if k not in ('value','index','indices','ref','refs')} for f in fields]
+
+    def _menu(self, el):
+        for name in ('aria-controls','aria-owns'):
+            ident=el.get_attribute(name)
+            if ident:
+                menu=self.page.locator('[id='+json.dumps(ident.split()[0])+']')
+                if menu.count()==1:return menu
+        return self.page
+
+    def _control(self, field, option=None):
+        ref=field.get('refs',[field.get('ref',{})])[option] if option is not None else field.get('ref',{})
+        if ref.get('id'):
+            locator=self.page.locator('[id='+json.dumps(ref['id'])+']')
+            if locator.count()==1:return locator
+        if ref.get('name'):
+            locator=self.page.locator(ref.get('tag','input')+'[name='+json.dumps(ref['name'])+']')
+            if locator.count()==1:return locator
+        # Reacquire anonymous controls by current semantic shape instead of stale indices.
+        fresh=self.page.evaluate(SNAPSHOT,CONTROLS)
+        matches=[f for f in fresh if f['label']==field['label'] and f['type']==field['type']]
+        if len(matches)!=1:raise Blocked('form_changed',field['label'])
+        index=matches[0]['indices'][option] if option is not None else matches[0]['index']
+        return self.page.locator(CONTROLS).nth(index)
+
+    def _application_scope(self, answers):
+        forms=set()
+        for answer in answers:
+            if answer['provenance'].get('fact_key') not in {'email','full_name','first_name','last_name'}:continue
+            owner=self._control(answer['field']).locator('xpath=ancestor::form[1]')
+            if owner.count()==1:forms.add(owner.evaluate('(e)=>Array.from(document.forms).indexOf(e)'))
+        if len(forms)>1:raise Blocked('unsupported_form','Applicant controls belong to different forms')
+        return self.page.locator('form').nth(next(iter(forms))) if forms else self.page
 
     def _fill(self,answer):
         f=answer['field']; value=answer['value']; controls=self.page.locator(CONTROLS)
-        el=controls.nth(f['index'])
+        el=self._control(f)
         if f['type']=='select':el.select_option(label=value)
-        elif f['type']=='radio':controls.nth(f['indices'][f['options'].index(value)]).check()
+        elif f['type']=='radio':self._control(f,f['options'].index(value)).check()
         elif f['type']=='checkbox':el.set_checked(value=='Yes')
         elif f['type']=='combobox':
             el.click()
             if el.evaluate('(e)=>e.tagName==="INPUT"'):el.fill(value)
-            self.page.get_by_role('option',name=value,exact=True).click()
+            self._menu(el).get_by_role('option',name=value,exact=True).click()
         else:
             if f['type']!='textarea' and '\n' in value:raise Blocked('invalid_single_line_answer',f['label'])
             el.fill(value)
 
     def _verify(self,answers,documents,fields):
         fresh=self._snapshot()
-        if digest(self._shape(fresh))!=digest(self._shape(fields)):raise Blocked('form_changed')
+        body=self.page.locator('body').inner_text()
+        completed={d['field']['label'] for d in documents if d['hash'] in self.uploaded_files and d['filename'] in body}
+        def remaining(items):return [f for f in items if not (f['type']=='file' and f['label'] in completed)]
+        if digest(self._shape(remaining(fresh)))!=digest(self._shape(remaining(fields))):raise Blocked('form_changed')
         for a in answers:
-            f=a['field']; el=self.page.locator(CONTROLS).nth(f['index']); value=a['value']
+            f=a['field']; el=self._control(f); value=a['value']
             if f['type']=='select':actual=el.locator('option:checked').inner_text().strip()
             elif f['type']=='radio':
-                actual=next((f['options'][i] for i,index in enumerate(f['indices']) if self.page.locator(CONTROLS).nth(index).is_checked()),'')
+                actual=next((f['options'][i] for i,index in enumerate(f['indices']) if self._control(f,i).is_checked()),'')
             elif f['type']=='checkbox':actual='Yes' if el.is_checked() else 'No'
-            elif f['type']=='combobox':actual=el.input_value() if el.evaluate('(e)=>e.tagName==="INPUT"') else el.inner_text().strip()
+            elif f['type']=='combobox':actual=next((x['value'] for x in fresh if x['label']==f['label'] and x['type']=='combobox'),'')
             else:actual=el.input_value()
+            if a['provenance'].get('fact_key')=='phone':
+                actual=re.sub(r'[^0-9]','',actual);value=re.sub(r'[^0-9]','',value)
             if actual!=value:raise Blocked('field_verification_failed',f['label'])
         for d in documents:
-            el=self.page.locator(CONTROLS).nth(d['field']['index'])
+            if d['hash'] in self.uploaded_files and d['filename'] in body:continue
+            el=self._control(d['field'])
             sizes=el.evaluate('(e)=>Array.from(e.files||[]).map(f=>f.size)')
             expected=safe_document(self.store.root/'documents'/d['filename'],self.store.root/'documents').stat().st_size
-            if sizes!=[expected]:raise Blocked('upload_verification_failed')
-        if self.page.locator('[aria-invalid=true]').count():raise Blocked('invalid_fields')
+            if sizes!=[expected] and not (d['hash'] in self.uploaded_files and d['filename'] in self.page.locator('body').inner_text()):raise Blocked('upload_verification_failed')
+        if self.page.locator('[aria-invalid=true]').count() or not self.page.evaluate('() => Array.from(document.forms).every(f=>f.checkValidity())'):raise Blocked('invalid_fields')
 
     def apply(self,job,live=True):
-        self.aid=None; self.attempted=False; self.denied_write=False
+        self.aid=None; self.attempted=False; self.denied_write=False; self.upload_payloads={}; self.uploaded_files=set()
         self.current_host=job['host']
         if self.test_url:self.current_host=urlsplit(self.test_url).hostname
         elif job['host'] not in ATS_HOSTS|PORTAL_HOSTS:raise Blocked('unapproved_destination')
         self.page.goto(job['url'],wait_until='domcontentloaded',timeout=45000)
-        self.page.wait_for_timeout(1500)
+        self._wait_ready()
         text=self._guard(job)
         # Portal host registration is not proof of a session; inspect the current page too.
         if job['host'] in PORTAL_HOSTS and job['host'] not in self.store.settings()['signed_in_portals'] and job['host'] not in {'www.deshaw.com','explore.jobs.netflix.net','career.mlp.com','jobs.uber.com','www.rentec.com'}:
@@ -199,10 +298,10 @@ class Browser:
             self._guard(job)
             fields=self._snapshot()
             if not fields:
-                apply=self.page.get_by_role('button',name=re.compile(r'^apply(?: now| for this job)?$',re.I))
-                if apply.count()!=1:apply=self.page.get_by_role('link',name=re.compile(r'^apply(?: now| for this job)?$',re.I))
+                apply=self.page.get_by_role('button',name=re.compile(r'^(?:apply(?: now| for this job)?|application)$',re.I))
+                if apply.count()!=1:apply=self.page.get_by_role('link',name=re.compile(r'^(?:apply(?: now| for this job)?|application)$',re.I))
                 if apply.count()!=1 or apply.evaluate('(e)=>!!e.closest("form")'):raise Blocked('unsupported_form','No unambiguous navigation-only application entry')
-                apply.click();self.page.wait_for_timeout(700);continue
+                apply.click();self._wait_ready();continue
             answers=[]; documents=[]; pending=[]
             for f in fields:
                 if not f['label']:
@@ -216,29 +315,34 @@ class Browser:
                         continue
                     documents.append({**dict(doc),'field':f});continue
                 try:
-                    from .provider import ClaudeProvider
-                    provider=None
-                    if len(self.store.templates())>1:provider=ClaudeProvider(self.store.settings()['model_timeout_seconds'])
-                    a=resolve(self.store,job['answer_scope'],f,provider)
+                    from .provider import LazyProvider
+                    provider=LazyProvider(self.store.settings()['model_timeout_seconds'])
+                    a=resolve(self.store,job['answer_scope'],f,provider,context={**job,'form_questions':[x['label'] for x in fields],'previous_templates':[x['provenance']['template_id'] for x in answers if 'template_id' in x['provenance']]})
                     if a:answers.append(a)
                     elif f['value']:raise Blocked('unknown_prefilled_value',f['label'])
                 except Blocked as e:
                     if e.reason=='human_work_sample':raise
+                    if not f['required'] and not f['value']:
+                        self.store.resolve_known_question(job['answer_scope'],f['label']);continue
                     self.store.ask(job['id'],job['answer_scope'],f['label'],f['options'],e.reason)
                     pending.append((f,e.reason))
             if pending:raise Blocked('missing_answers','; '.join(f['label'] for f,_ in pending))
             for d in documents:
                 path=safe_document(self.store.root/'documents'/d['filename'],self.store.root/'documents')
                 if hashlib.sha256(path.read_bytes()).hexdigest()!=d['hash']:raise Blocked('document_tampered')
-                self.page.locator(CONTROLS).nth(d['field']['index']).set_input_files(str(path))
+                self.upload_payloads[d['hash']]=path.read_bytes()
+                self._control(d['field']).set_input_files(str(path))
+            if documents:
+                with contextlib.suppress(Exception):self.page.wait_for_load_state('networkidle',timeout=8000)
             for a in answers:self._fill(a)
             self._verify(answers,documents,fields)
             self._guard(job)
             all_answers.extend(answers);all_docs.extend(documents)
             steps.append({'step':step,'fields':fields,'url':self.page.url})
-            submit=self.page.get_by_role('button',name=re.compile(r'^(submit(?: application)?|send application|apply|finish|review & apply)$',re.I))
+            scope=self._application_scope(answers)
+            submit=scope.get_by_role('button',name=re.compile(r'^(submit(?: application)?|send application|apply|finish|review & apply)$',re.I))
             if submit.count()!=1:
-                nxt=self.page.get_by_role('button',name=re.compile(r'^(next|continue|save and continue)$',re.I))
+                nxt=scope.get_by_role('button',name=re.compile(r'^(next|continue|save and continue)$',re.I))
                 if nxt.count()!=1:raise Blocked('unsupported_submit','No unique final submit or next button')
                 # Save durable draft Q&A before any portal step may save data remotely.
                 self.store.event('draft_step',job['id'],{'answers':answers,'documents':documents,'url':self.page.url})

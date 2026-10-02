@@ -6,7 +6,7 @@ Runs every **six hours**, normally aiming for **seven submissions per cycle**, u
 
 ## Start
 
-Requires Python 3.11+, Google Chrome (or bundled Chromium), and Claude Code signed into your subscription if you use model-assisted resume extraction or multiple approved answer templates.
+Requires Python 3.11+, Google Chrome (or bundled Chromium), and Claude Code signed into your subscription if you use model-assisted resume extraction, semantic question matching, or writing-sample selection. A configured Claude CLI API key is also forwarded privately when present.
 
 ```bash
 ./setup.sh
@@ -31,7 +31,7 @@ The shared authoritative ledger is at `~/.local/share/please-hire-me/ledger.sqli
 
 Facts have provenance, confirmation and revisions. Resume extraction produces proposals. Citizenship, sponsorship, work authorization, GPA, dates, experience and disclosures are never inferred from template defaults. Blank values remain unknown. Editing JSON exports does not update the ledger; use the dashboard.
 
-Claude receives only the data needed for an inference request, through stdin. It runs in safe mode without built-in tools, MCP, browser access, project configuration or session persistence. It can propose quoted resume facts or select existing approved answer text. It cannot write arbitrary factual application prose. The CLI still uses its normal subscription authentication; this is a tool-capability boundary, not an OS sandbox around the Claude executable.
+Claude receives only the data needed for an inference request, through stdin. It runs in safe mode without built-in tools, MCP, browser access, project configuration or session persistence. It can propose quoted resume facts, match question wording to confirmed profile facts, select approved writing samples, or assemble relevant sentences from those samples. It cannot introduce new factual prose; assembled sentences retain their original wording and source revisions. The CLI still uses its normal subscription authentication; this is a tool-capability boundary, not an OS sandbox around the Claude executable.
 
 Personal information necessarily leaves your computer when supplied to the model or submitted to an employer. Gitignore is not a privacy guarantee. Do not commit personal files or screenshots.
 
@@ -39,7 +39,7 @@ Personal information necessarily leaves your computer when supplied to the model
 
 Supported single-page forms are inspected and filled by deterministic Playwright code in a **dedicated browser profile**. Your everyday tabs and sessions are not attached. The worker uses genuine browser controls; it does not promise to avoid bot detection or bypass CAPTCHA.
 
-Fields must match a known exact fact mapping, an employer-scoped saved answer, or approved template wording. Required unknowns, mismatched options, truncation, unsupported widgets, ambiguous eligibility and no-AI/work-sample questions become dashboard exceptions. Optional unknown values are left blank; unsupported prefilled values block submission.
+Fields use known mappings, cached semantic matches to confirmed facts, employer-scoped saved answers, or approved writing samples. Exact school/degree aliases and graduation-season formatting are supported. Direct internship evidence can come from the hash-checked resume. Required unknowns, mismatched options, truncation, unsupported widgets, ambiguous eligibility and no-AI/work-sample questions become dashboard exceptions. Optional unknown values are left blank; unsupported prefilled values block submission.
 
 The worker records Q&A and a before-submit screenshot, validates the package again, reserves company/day limits and commits a submit intent before the final click. Confirmation text and an after-submit screenshot determine the recorded outcome. Crash/disconnect/network ambiguity becomes **UNKNOWN**, never an automatic retry. Verify it at the employer and reconcile through the dashboard.
 
@@ -68,7 +68,7 @@ The legacy Gmail/Keychain/clipboard broker and localhost resume server are disab
 .venv/bin/python -m hireme daemon  # alternative terminal scheduler
 ```
 
-The Mac LaunchAgent uses escaped plist serialization and one shared worker label. Linux cron uses quoted paths. OS file locks prevent overlapping workers; uncertain attempts and budget reservations also live in SQLite. Scheduling requires completed onboarding. The computer must be awake and the dedicated browser available. A launchd interval is not a promise of four runs during sleep. Keep the dashboard command open for the local UI; scheduled workers run independently.
+The Mac LaunchAgent uses escaped plist serialization and one shared worker label. Configured Claude connection credentials are preserved in its private 0600 plist so scheduled requests use the same connection. Linux cron uses quoted paths. OS file locks prevent overlapping workers; uncertain attempts and budget reservations also live in SQLite. Scheduling requires completed onboarding. The computer must be awake and the dedicated browser available. A launchd interval is not a promise of four runs during sleep. Keep the dashboard command open for the local UI; scheduled workers run independently.
 
 ## Discovery and fit
 

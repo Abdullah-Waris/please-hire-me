@@ -20,6 +20,9 @@ CREATE TABLE IF NOT EXISTS facts (key TEXT PRIMARY KEY, value TEXT NOT NULL, sou
 CREATE TABLE IF NOT EXISTS templates (id TEXT PRIMARY KEY, category TEXT NOT NULL, body TEXT NOT NULL, revision INTEGER NOT NULL, updated TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS answers (id TEXT PRIMARY KEY, question TEXT NOT NULL, host TEXT NOT NULL,
  options TEXT NOT NULL, value TEXT NOT NULL, fact_key TEXT, revision INTEGER NOT NULL, updated TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS writing_answers (id TEXT PRIMARY KEY, body TEXT NOT NULL, provenance TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS field_bindings (id TEXT PRIMARY KEY, host TEXT NOT NULL, label TEXT NOT NULL,
+ options TEXT NOT NULL, fact_key TEXT, template_id TEXT, created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS documents (kind TEXT PRIMARY KEY, hash TEXT NOT NULL, filename TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, company TEXT NOT NULL, company_key TEXT NOT NULL,
  title TEXT NOT NULL, url TEXT UNIQUE NOT NULL, host TEXT NOT NULL, source TEXT NOT NULL,
@@ -126,7 +129,7 @@ class Store:
 
     def ask(self, job_id, host, label, options, reason="missing_fact"):
         key = self.question_key(host, label, options)
-        self.db.execute("INSERT OR IGNORE INTO questions VALUES(?,?,?,?,?,?,0)",
+        self.db.execute("INSERT INTO questions VALUES(?,?,?,?,?,?,0) ON CONFLICT(id) DO UPDATE SET job_id=excluded.job_id,reason=excluded.reason,resolved=0",
                         (key, job_id, host, label, json.dumps(options), reason))
         return key
 
@@ -174,6 +177,29 @@ class Store:
                 if candidate['host'].split('|',1)[0]==host.split('|',1)[0] and candidate['fact_key'] in universal:
                     r=candidate;break
         return dict(r) if r else None
+
+    def writing_answer(self, host, label, options):
+        row=self.db.execute('SELECT * FROM writing_answers WHERE id=?',(self.question_key(host,label,options),)).fetchone()
+        return {'value':row['body'],'provenance':json.loads(row['provenance'])} if row else None
+
+    def save_writing_answer(self, host, label, options, answer):
+        self.db.execute('INSERT OR REPLACE INTO writing_answers VALUES(?,?,?)',
+                        (self.question_key(host,label,options),answer['value'],json.dumps(answer['provenance'])))
+
+    def field_binding(self, host, label, options):
+        row=self.db.execute('SELECT * FROM field_bindings WHERE id=?',(self.question_key(host,label,options),)).fetchone()
+        return dict(row) if row else None
+
+    def bind_field(self, host, label, options, fact_key=None, template_id=None):
+        if bool(fact_key)==bool(template_id):raise ValueError('Choose one supported source')
+        if fact_key and fact_key not in self.facts():raise ValueError('Unconfirmed fact')
+        if template_id and not any(t['id']==template_id for t in self.templates()):raise ValueError('Unknown template')
+        self.db.execute('INSERT OR REPLACE INTO field_bindings VALUES(?,?,?,?,?,?,?)',
+                        (self.question_key(host,label,options),host,label,json.dumps(options),fact_key,template_id,now()))
+
+    def resolve_known_question(self, host, label):
+        self.db.execute('UPDATE questions SET resolved=1 WHERE host=? AND label=? AND reason!=?',
+                        (host,label,'legacy_history_review'))
 
     def upsert_job(self, job):
         key = job["id"]

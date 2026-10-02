@@ -4,7 +4,13 @@ from hireme.store import Store
 from hireme.util import digest
 
 @pytest.fixture
-def store(tmp_path):
+def store(tmp_path,monkeypatch):
+    class OfflineProvider:
+        def __init__(self,*args,**kwargs):pass
+        def choose_answer(self,*args,**kwargs):return None
+        def choose_sentences(self,*args,**kwargs):return []
+        def match_field(self,*args,**kwargs):return {'fact_key':None,'template_id':None}
+    monkeypatch.setattr('hireme.provider.ClaudeProvider',OfflineProvider)
     s=Store(tmp_path/'private')
     s.put_facts({'full_name':'Test Person','first_name':'Test','last_name':'Person','email':'test@candidate.invalid','phone':'5551234567','location':'Berkeley, CA','graduation':'2028-05','work_authorized_us':'Yes','needs_sponsorship':'No','us_person':'Yes','professional_years':'1','skills':'Python, TypeScript'})
     docs=s.root/'documents';docs.mkdir();data=b'%PDF-1.4\nsynthetic test document';h=hashlib.sha256(data).hexdigest();(docs/(h+'.pdf')).write_bytes(data)

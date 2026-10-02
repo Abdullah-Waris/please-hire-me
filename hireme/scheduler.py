@@ -5,6 +5,7 @@ import plistlib
 import shlex
 import subprocess
 import sys
+import tempfile
 from pathlib import Path
 
 from .util import private_dir
@@ -24,8 +25,15 @@ def install(store,repo):
         payload={'Label':LABEL,'ProgramArguments':[sys.executable,'-m','hireme','--data-dir',str(store.root),'run'],
           'WorkingDirectory':str(repo),'StartInterval':hours*3600,'RunAtLoad':False,
           'StandardOutPath':str(logs/'worker.out.log'),'StandardErrorPath':str(logs/'worker.err.log'),
-          'EnvironmentVariables':{'PATH':os.environ.get('PATH','/usr/local/bin:/usr/bin:/bin')}}
-        path.write_bytes(plistlib.dumps(payload));os.chmod(path,0o600)
+          'EnvironmentVariables':{'PATH':os.environ.get('PATH','/usr/local/bin:/usr/bin:/bin'),
+              **{k:os.environ[k] for k in ('ANTHROPIC_API_KEY','CLAUDE_CODE_OAUTH_TOKEN','CLAUDE_CONFIG_DIR','XDG_CONFIG_HOME') if os.environ.get(k)}}}
+        # Connection secrets stay in a private file, never argv or logs.
+        with tempfile.NamedTemporaryFile(dir=directory,prefix='.'+LABEL,delete=False) as f:
+            temporary=Path(f.name)
+            try:
+                f.write(plistlib.dumps(payload));f.flush();os.fsync(f.fileno())
+                os.replace(temporary,path)
+            finally:temporary.unlink(missing_ok=True)
         subprocess.run(['launchctl','bootout',f'gui/{os.getuid()}/{LABEL}'],capture_output=True)
         r=subprocess.run(['launchctl','bootstrap',f'gui/{os.getuid()}',str(path)],capture_output=True)
         if r.returncode:raise ValueError('launchd rejected worker; run hireme daemon in a terminal')
