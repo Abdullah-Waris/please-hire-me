@@ -1,94 +1,52 @@
 {
-  "_readme": "Every knob the agent obeys. Copy to settings.json (setup.sh does this for you) and edit. Full docs: README.md#settings.",
-  "run": {
-    "max_applications_per_run": 3,
-    "one_application_per_company_per_run": true,
-    "same_day_company_freeze": true,
-    "max_applications_per_company_lifetime": 2,
-    "_lifetime_cap_note": "Hard ceiling on TOTAL applications ever sent to one company, counted across applications/ AND logs/applications-log.md. An ATS dedupes by email, so every req lands on one candidate profile: many reqs in a short window read as spray, not interest, and buy nothing past the second. At the cap, SKIP the company and log one line.",
-    "pause_company_while_interviewing": true,
-    "_interview_pause_note": "Never send a new application to a company where an interview is in progress. A second recruiter can auto-reject the new req, stamping a rejection on the profile of an active loop. List interviewing companies in targets.skip_companies with the reason.",
-    "interview_tracker_path": "",
-    "_interview_tracker_note": "Optional absolute path to a note or file where YOU track interviews, OAs and recruiter threads (any format; company names are grepped). When set, the agent reads it at the start of every run and treats every company named in it as a HARD SKIP, on top of skip_companies. Keep it current and you never have to edit skip_companies by hand. Empty means off."
-  },
-  "schedule": {
-    "frequency": "manual",
-    "_frequency_options": "manual | hourly | every-2-hours | every-3-hours | every-6-hours | daily | weekdays"
-  },
-  "targets": {
-    "roles": [
-      "software engineer",
-      "full stack engineer",
-      "AI/ML engineer",
-      "research engineer",
-      "forward deployed engineer",
-      "member of technical staff"
-    ],
-    "seniority": [
-      "new-grad",
-      "internship"
-    ],
-    "max_years_experience_required": 1,
-    "locations": [
-      "San Francisco Bay Area",
-      "New York",
-      "Seattle",
-      "Remote (US)"
-    ],
-    "min_annual_comp_usd": 150000,
-    "_min_annual_comp_note": "Applies to FULL-TIME roles only. Internships post hourly or monthly pay and would fail an annual floor, so they are judged by internship_min_hourly_usd instead.",
-    "internship_min_hourly_usd": 0,
-    "_internship_note": "Hourly floor for internships. 0 means no floor: judge internships by prestige_note alone. Top US SWE internships run roughly $40-$120/hour.",
-    "prioritize_above_usd": 250000,
-    "count_equity_toward_comp": true,
-    "prestige_note": "One or two sentences describing what makes a company worth your time. The agent uses this as a judgment gate when a posting lists no salary band. Example: 'Only frontier AI labs, top-tier AI startups, or top quant firms. Skip ordinary enterprise software companies.'",
-    "priority_companies": [],
-    "skip_companies": [],
-    "skip_notes": [
-      "Defense and ITAR employers require US persons.",
-      "Companies that do not sponsor visas are a dead end if you need sponsorship."
-    ]
-  },
-  "eligibility": {
-    "needs_visa_sponsorship": false,
-    "us_person_only_roles_ok": true,
-    "earliest_start": "2027-06",
-    "latest_start": "2027-09",
-    "graduation": "May 2027"
-  },
-  "channels": {
-    "allowed_ats": [
-      "greenhouse",
-      "lever",
-      "ashby",
-      "workable",
-      "company career portal"
-    ],
-    "blocked_aggregators": [
-      "handshake",
-      "linkedin easy apply",
-      "simplify",
-      "indeed quick apply"
-    ],
-    "_why": "Aggregators need accounts and hide the real form. The agent applies on the company's own ATS only.",
-    "signed_in_portals": [],
-    "_signed_in_portals_note": "Optional. Career portals where YOU created the account and your Chrome is signed in. The agent may apply inside that session. It never creates accounts or types passwords; a login page is NEEDS HUMAN."
-  },
-  "broker": {
-    "gmail_account": "",
-    "signup_email_pattern": "",
-    "keychain_service": "jobapply-gmail-imap",
-    "_broker_note": "Optional. scripts/code_broker.py reads emailed verification codes over Gmail IMAP and pastes them into the page without the agent ever seeing the code or the password. One-time setup, done by YOU, not the agent: turn on 2-Step Verification, create an app password at https://myaccount.google.com/apppasswords, then in your own Terminal run `security add-generic-password -s jobapply-gmail-imap -a <gmail_account> -w` and paste it at the hidden prompt. Check with `python3 scripts/code_broker.py check`. signup_email_pattern is the plus address used per portal, {tag} = portal name."
-  },
-  "safety": {
-    "never_create_accounts": true,
-    "never_solve_interactive_captcha": true,
-    "never_fabricate_a_fact": true,
-    "screenshot_every_submit": true,
-    "require_log_before_submit": true
-  },
-  "integrations": {
-    "post_run_script": "",
-    "_post_run_note": "Optional path to a python3 script run after each run. Left empty by default."
-  }
+  "schema_version": 1,
+  "timezone": "America/Los_Angeles",
+  "schedule_hours": 6,
+  "target_per_cycle": 7,
+  "max_per_cycle": 10,
+  "target_per_day": 28,
+  "max_per_day": 40,
+  "max_per_company": 2,
+  "company_cooldown_days": 90,
+  "live_enabled": false,
+  "onboarding_complete": false,
+  "browser_channel": "chrome",
+  "headless": false,
+  "discovery_workers": 6,
+  "summer_2027_locations": [
+    "United States",
+    "Remote (US)"
+  ],
+  "school_locations": [
+    "San Francisco Bay Area",
+    "Remote (US)"
+  ],
+  "prior_employers": [],
+  "locations": [
+    "San Francisco Bay Area",
+    "New York",
+    "Seattle",
+    "Remote (US)"
+  ],
+  "roles": [
+    "software",
+    "machine learning",
+    "research",
+    "developer",
+    "technical staff"
+  ],
+  "seniority": [
+    "internship",
+    "new-grad"
+  ],
+  "min_annual_usd": 0,
+  "min_hourly_usd": 0,
+  "skip_companies": [],
+  "interview_companies": [],
+  "company_aliases": {},
+  "signed_in_portals": [],
+  "min_fit_score": 45,
+  "max_years_required": 1,
+  "model_timeout_seconds": 90,
+  "cycle_timeout_seconds": 10800
 }

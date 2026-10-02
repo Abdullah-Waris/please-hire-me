@@ -58,3 +58,11 @@ venv/
 !config/settings.example.json
 !data/queue.example.md
 !data/sources.md
+
+# Packaging, local verification, and design tool artifacts
+*.egg-info/
+.pytest_cache/
+.kiss-worktrees/
+.impeccable/
+output/
+tmp/

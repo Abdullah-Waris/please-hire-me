@@ -1,0 +1,9 @@
+<!doctype html><html lang="en"><head><title>Synthetic application</title></head><body>
+<h1>Software Engineer Intern Summer 2027</h1><p>Build Python and TypeScript software in San Francisco, United States.</p>
+<form id="application"><label for="name">Full name</label><input id="name" name="name" required>
+<label for="email">Email</label><input id="email" name="email" type="email" required>
+<label for="resume">Resume</label><input id="resume" name="resume" type="file" required>
+<fieldset><legend>Will you require sponsorship?</legend><input id="yes" name="sponsor" type="radio" value="Yes" required><label for="yes">Yes</label><input id="no" name="sponsor" type="radio" value="No" required><label for="no">No</label></fieldset>
+<button type="submit">Submit application</button></form>
+<script>document.getElementById('application').addEventListener('submit',async e=>{e.preventDefault();let f=new FormData(e.target);await fetch('/submit',{method:'POST',body:f});document.body.replaceChildren();let h=document.createElement('h1');h.textContent='Thank you for applying. Your application has been received.';document.body.append(h);});</script>
+</body></html>

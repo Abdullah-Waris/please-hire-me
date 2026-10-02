@@ -1,10 +1,8 @@
-**What this changes**
+**Behavior changed**
 
-**Why**
-
-**Checks**
-- [ ] `bash -n setup.sh run.sh scripts/*.sh` passes
-- [ ] `python3 -m json.tool` passes on both `config/*.example.json`
-- [ ] `git ls-files | grep -Ev '\.example\.' | grep -E 'profile|answers|queue|applications/|logs/|screenshots/|state/'` prints nothing
-- [ ] No new runtime dependencies
-- [ ] Does not help the agent fabricate, bypass a CAPTCHA, or fake human behavior
+**Validation**
+- [ ] Local invariant suite and synthetic browser fixtures pass
+- [ ] Every changed shell file parses individually
+- [ ] No personal data or application artifacts are staged
+- [ ] Unknown facts/outcomes fail closed; no expanded model tool authority
+- [ ] Live acceptance/session/scheduler claims are separately evidenced
