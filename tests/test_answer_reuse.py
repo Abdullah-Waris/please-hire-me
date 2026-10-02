@@ -136,3 +136,50 @@ def test_semantic_model_cannot_turn_unrelated_boolean_into_new_claim(store,job):
     class Model:
         def match_field(self,*args):return {'fact_key':'needs_sponsorship','template_id':None}
     with pytest.raises(Blocked):resolve(store,job['host'],field('Have you published five research papers?','select',['Yes','No']),Model())
+
+
+def test_long_writing_sample_is_assembled_within_question_sentence_limit(store,job,package):
+    store.put_template('project','I built a Python service. I added tracing. I measured latency. I improved retries. I documented the rollout.')
+    class Model:
+        def choose_sentences(self,label,choices,*args):return [c['id'] for c in choices[:3]]
+    f=field('Describe a project you built in 3-4 sentences.','textarea')
+    a=resolve(store,job['host'],f,Model(),context=job)
+    assert a['value']=='I built a Python service. I added tracing. I measured latency.'
+    assert len(a['provenance']['sample_parts'])==3
+    package['answers']=[a];package['steps']=[]
+    validate_package(store,job,package)
+
+
+def test_sample_selection_cannot_exceed_word_limit(store,job):
+    store.put_template('project','I built a Python service and measured every deployment carefully.')
+    class Model:
+        def choose_sentences(self,label,choices,*args):return [c['id'] for c in choices]
+    with pytest.raises(Blocked,match='answer_too_long'):resolve(store,job['host'],field('Describe a project you built; maximum 5 words.','textarea'),Model(),context=job)
+
+
+def test_numbered_examples_inherit_shared_sentence_limit(store,job,package):
+    tid=store.put_template('project','I built a service. I added tracing. I measured latency. I improved retries. I documented the rollout.')
+    instruction=field('Each bullet should be concise, no longer than 3-4 sentences each. First example:','textarea')
+    instruction['required']=False
+    class Model:
+        def match_field(self,*args):return {'fact_key':None,'template_id':tid}
+        def choose_sentences(self,label,choices,context,*args):
+            assert context['max_sentences']==4
+            return [c['id'] for c in choices[:3]]
+    f=field('Second example:','textarea')
+    a=resolve(store,job['host'],f,Model(),context={**job,'form_questions':[instruction['label'],f['label']]})
+    assert len(a['provenance']['sample_parts'])==3
+    package['answers']=[a];package['steps']=[{'fields':[instruction,f]}]
+    validate_package(store,job,package)
+
+
+def test_cached_writing_is_reassembled_for_a_shorter_field(store,job):
+    store.put_template('project','I built a service. I added tracing. I measured latency. I improved retries. I documented the rollout.')
+    class Model:
+        def choose_sentences(self,label,choices,context,maxlength):return [c['id'] for c in choices[:1 if maxlength<30 else 3]]
+    f=field('Describe a project you built','textarea');f['maxlength']=70
+    first=resolve(store,job['host'],f,Model(),context=job)
+    f['maxlength']=27
+    shorter=resolve(store,job['host'],f,Model(),context=job)
+    assert len(shorter['value'])<len(first['value']) and shorter['value']=='I built a service.'
+    assert resolve(store,job['host'],f,context=job)==shorter

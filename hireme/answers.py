@@ -116,6 +116,24 @@ def _discovery_answer(label, options, context):
     return None
 
 
+def _sentence_cap(field, context=None):
+    pattern=r'(\d+)(?:\s*[-–]\s*(\d+))?\s+sentences?'
+    limit=re.search(pattern,field['label'],re.I)
+    if not limit and re.search(r'^(?:first|second|third|fourth|\d+(?:st|nd|rd|th)?) example',field['label'],re.I):
+        for label in (context or {}).get('form_questions',[]):
+            shared=re.search(r'each (?:bullet|example|answer).{0,180}?'+pattern,label,re.I)
+            if shared:limit=shared;break
+    return int(limit[2] or limit[1]) if limit else None
+
+
+def _fits_writing_limits(value, field, context=None):
+    if field.get('maxlength',-1)>0 and len(value)>field['maxlength']:return False
+    sentence_limit=_sentence_cap(field,context)
+    if sentence_limit is not None and len(re.split(r'(?<=[.!?])\s+(?=[A-Z])',value))>sentence_limit:return False
+    word_limit=re.search(r'(?:at most|up to|no more than|maximum|max\.?|under|limit(?: of)?)\s*(\d+)\s+words?',field['label'],re.I)
+    return not word_limit or len(value.split())<=int(word_limit[1])
+
+
 def _compatible_binding(key, label):
     terms={
         'needs_sponsorship':r'sponsor|visa|immigration|h.?1b',
@@ -159,14 +177,20 @@ def _validate_writing(store, answer):
 
 
 def resolve(store, host, field, provider=None, context=None):
-    label=field['label'];options=field.get('options',[]);context=context or {}
+    label=field['label'];options=field.get('options',[]);context=dict(context or {})
+    context['max_sentences']=_sentence_cap(field,context)
     if REFUSE.search(label):raise Blocked('human_work_sample',label)
     writing=store.writing_answer(host,label,options)
     if writing:
-        _validate_writing(store,writing)
-        if field.get('maxlength',-1)>0 and len(writing['value'])>field['maxlength']:raise Blocked('answer_too_long',label)
-        store.resolve_known_question(host,label)
-        return {'field':field,**writing}
+        try:
+            _validate_writing(store,writing)
+            if not _fits_writing_limits(writing['value'],field,context):raise Blocked('answer_too_long',label)
+        except Blocked:
+            if not provider:raise
+            store.db.execute('DELETE FROM writing_answers WHERE id=?',(store.question_key(host,label,options),))
+        else:
+            store.resolve_known_question(host,label)
+            return {'field':field,**writing}
     saved=store.saved_answer(host,label,options)
     key=None;template=None;derived=None
     if saved:
@@ -206,7 +230,7 @@ def resolve(store, host, field, provider=None, context=None):
                 elif tid:
                     template=next((t for t in store.templates() if t['id']==tid),None)
                     if template:store.bind_field(host,label,options,template_id=tid)
-        if template and _foreign_targets(store,template,context):template=None
+        if template and (_foreign_targets(store,template,context) or not _fits_writing_limits(template['body'],field,context)):template=None
         is_writing=not options and field.get('type') in ('text','textarea') and (cat or re.search(r'example|describe|tell us|why|what interests|share.*(?:work|project)',label,re.I))
         if not template and not key and not derived and provider and is_writing:
             choices=_approved_sentences(store,context)
@@ -216,7 +240,7 @@ def resolve(store, host, field, provider=None, context=None):
                 parts=[{k:v for k,v in by_id[x].items() if k!='id'} for x in ids]
                 writing={'value':' '.join(p['text'] for p in parts),'provenance':{'sample_parts':parts}}
                 _validate_writing(store,writing)
-                if field.get('maxlength',-1)>0 and len(writing['value'])>field['maxlength']:raise Blocked('answer_too_long',label)
+                if not _fits_writing_limits(writing['value'],field,context):raise Blocked('answer_too_long',label)
                 store.save_writing_answer(host,label,options,writing);store.resolve_known_question(host,label)
                 return {'field':field,**writing}
         if template:
@@ -246,9 +270,11 @@ def validate_package(store, job, package):
         raise Blocked("package_destination_mismatch")
     if not isinstance(package.get("answers"),list): raise Blocked("invalid_package")
     facts=store.facts()
+    writing_context={"form_questions":[f["label"] for step in package.get("steps",[]) for f in step.get("fields",[])]}
     for answer in package["answers"]:
         field=answer["field"]
         prov=answer.get("provenance",{})
+        if not _fits_writing_limits(answer["value"],field,writing_context):raise Blocked("answer_too_long",field["label"])
         if 'sample_parts' in prov:
             _validate_writing(store,answer)
             cached=store.writing_answer(job.get('answer_scope',job['host']),field['label'],field.get('options',[]))
