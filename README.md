@@ -43,6 +43,8 @@ The setup page checks the machine and guides you through:
 6. **Schedule and limits:** choose batch frequency and daily/cycle ceilings. Save preferences before continuing.
 7. **Model connection and run location:** choose CLI or API, check installation/login, and choose this computer or Pi/Linux. Finish **paused**, or explicitly start scheduled applications.
 
+Clearing a saved optional fact and saving removes it from confirmed use. Fact revisions are preserved, and removing a required fact through the API pauses the worker and cancels its active generation. Your application history and uncertain outcomes remain recorded.
+
 Your facts initially shows the required essentials; use the optional-facts toggle to add availability, education details, or disclosures. Yes/No suggestions and month pickers help with exact formats. Setup is resumable: saved documents, facts, and preferences remain in the local database after you close the browser. The steps use the same editing screens you can revisit later. Choosing Pi does not transfer your files or provision another machine.
 
 ### Try a sample workspace

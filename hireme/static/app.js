@@ -736,7 +736,11 @@ function renderFacts() {
         country: "country-name",
       };
       if (autocomplete[key]) input.autocomplete = autocomplete[key];
-      if (state.facts[key] && !state.facts[key].confirmed)
+      if (
+        state.facts[key] &&
+        !state.facts[key].confirmed &&
+        state.facts[key].source !== "revoked"
+      )
         label.append(
           el("span", "Extracted from resume — please confirm", "candidate"),
         );
@@ -881,25 +885,30 @@ function render() {
       : `${submitted} confirmed today · ${Math.max(0, state.settings.target_per_day - submitted)} to your daily target`;
   $("#daily-target").textContent =
     `Daily target: ${state.settings.target_per_day}`;
-  $("#setup-callout").hidden = state.settings.onboarding_complete;
+  $("#setup-callout").hidden =
+    state.settings.onboarding_complete && !state.missing_setup.length;
   $("#worker-state").textContent = state.demo
     ? "Read-only sample workspace"
     : state.worker_running
       ? state.settings.live_enabled
         ? "Batch running"
         : "Pausing active batch…"
-      : !state.settings.onboarding_complete
+      : !state.settings.onboarding_complete || state.missing_setup.length > 0
         ? "Setup needed"
         : state.settings.live_enabled
           ? "Automatic submissions enabled"
           : "Submissions paused";
   $("#pause").textContent = state.settings.live_enabled ? "Pause" : "Resume";
-  $("#pause").disabled = state.demo || !state.settings.onboarding_complete;
+  $("#pause").disabled =
+    state.demo ||
+    (!state.settings.live_enabled &&
+      (!state.settings.onboarding_complete || state.missing_setup.length > 0));
   $("#run").disabled =
     state.demo ||
     state.worker_running ||
     !state.settings.onboarding_complete ||
-    !state.settings.live_enabled;
+    !state.settings.live_enabled ||
+    state.missing_setup.length > 0;
   $("#demo-banner").hidden = !state.demo;
   renderLedger();
   renderSetup();
@@ -976,9 +985,16 @@ $("#facts-form").onsubmit = async (e) => {
     [...new FormData(e.target)].filter(([, v]) => v.trim()),
   );
   try {
-    await api("/api/facts", { facts });
+    const clear = [...new FormData(e.target)]
+      .filter(([key, value]) => !value.trim() && state.facts[key]?.value)
+      .map(([key]) => key);
+    await api("/api/facts", { facts, clear });
     $("#confirm-facts").checked = false;
-    note("Confirmed facts saved. They will be reused automatically.");
+    note(
+      clear.length
+        ? "Facts saved. Cleared values will no longer be reused."
+        : "Confirmed facts saved. They will be reused automatically.",
+    );
     document.activeElement.blur();
     await refresh();
   } catch (e) {

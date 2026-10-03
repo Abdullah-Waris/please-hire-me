@@ -40,7 +40,7 @@ def summary(store, at=None):
 
 def spreadsheet_text(value):
     """Keep untrusted posting text from becoming a formula when opened in a spreadsheet."""
-    text = str(value or '')
+    text = '' if value is None else str(value)
     if text.lstrip().startswith(('=', '+', '-', '@')) or text.startswith(('\t', '\r', '\n')):
         return "'" + text
     return text

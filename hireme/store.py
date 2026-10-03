@@ -10,7 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
 
-from .config import DEFAULTS, REQUIRED, validate_fact, validate_settings
+from .config import DEFAULTS, FACTS, REQUIRED, validate_fact, validate_settings
 from .util import Blocked, atomic_json, company_key, digest, now, private_dir
 
 SCHEMA = """
@@ -133,21 +133,46 @@ class Store:
         rows = self.db.execute("SELECT * FROM facts" + (" WHERE confirmed=1" if confirmed else ""))
         return {r["key"]: dict(r) for r in rows}
 
-    def put_facts(self, values, source="user", confirmed=True):
+    def put_facts(self, values, source="user", confirmed=True, clear_keys=None):
         # A dashboard submission is an explicit user confirmation, not model approval.
-        values = {k: validate_fact(k, v) for k, v in values.items() if v is not None and v != ""}
+        if not isinstance(values, dict):
+            raise ValueError("Provide a facts object")
+        clear_keys = [] if clear_keys is None else clear_keys
+        if not isinstance(clear_keys, list) or any(
+                not isinstance(key, str) or key not in FACTS for key in clear_keys):
+            raise ValueError("Choose known facts to clear")
+        cleared = set(clear_keys)
+        values = {key: validate_fact(key, value) for key, value in values.items()
+                  if value is not None and value != ""}
+        if cleared & values.keys():
+            raise ValueError("A fact cannot be saved and cleared at the same time")
         with self.transaction():
             old = self.facts(False)
-            if "email" in old and old["email"]["confirmed"] and "email" in values and values["email"] != old["email"]["value"]:
-                if (self.db.execute("SELECT 1 FROM applications LIMIT 1").fetchone()
-                        or self.db.execute("SELECT 1 FROM employer_accounts LIMIT 1").fetchone()):
+            history = bool(self.db.execute("SELECT 1 FROM applications LIMIT 1").fetchone()
+                           or self.db.execute("SELECT 1 FROM employer_accounts LIMIT 1").fetchone())
+            if old.get("email", {}).get("confirmed") and history:
+                if "email" in cleared:
+                    raise ValueError("Applicant identity cannot be cleared after application or account history exists")
+                if "email" in values and values["email"] != old["email"]["value"]:
                     raise ValueError("Applicant identity cannot change after application or account history exists")
             for key, value in values.items():
                 self.db.execute("""INSERT INTO facts VALUES(?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET
-                  value=excluded.value, source=excluded.source, confirmed=excluded.confirmed,
-                  revision=facts.revision+1, updated=excluded.updated""", (key,value,source,int(confirmed),1,now()))
+                    value=excluded.value,source=excluded.source,confirmed=excluded.confirmed,
+                    revision=facts.revision+1,updated=excluded.updated""",
+                    (key, value, source, int(confirmed), 1, now()))
+            for key in cleared:
+                # Preserve revisions so revoked facts cannot be mistaken for old confirmations.
+                self.db.execute("""UPDATE facts SET value='',source='revoked',confirmed=0,
+                    revision=revision+1,updated=? WHERE key=?""", (now(), key))
+            if cleared:
+                self.event("facts_revoked", "profile", sorted(cleared))
+                if cleared & REQUIRED and self.settings()['live_enabled']:
+                    settings = self.settings()
+                    settings['live_enabled'] = False
+                    self.db.execute("UPDATE config SET value=? WHERE id=1", (json.dumps(settings),))
+                    self.db.execute("UPDATE worker_control SET generation=generation+1 WHERE id=1")
+                    self.event("pause_requested", "worker", {'reason': 'required_fact_removed'})
             self.event("facts_confirmed" if confirmed else "facts_proposed", "profile", sorted(values))
-            # Prepared packages are invalidated by any profile change.
             self.db.execute("DELETE FROM applications WHERE state='prepared'")
         self.export_config()
 

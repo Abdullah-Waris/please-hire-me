@@ -137,7 +137,7 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                         if role not in ('personal','style','reference') or not isinstance(text,str) or not 20<=len(text)<=12000:raise ValueError('Provide 20–12,000 characters and an approved use')
                         material=import_material(store,text.encode(),'Typed context.txt','writing_sample' if role=='style' else 'context')
                         review_material(store,material['id'],text,role,True);result={'saved':True}
-                    elif path=='/api/facts':store.put_facts(data['facts']);result={'saved':True}
+                    elif path=='/api/facts':store.put_facts(data['facts'],clear_keys=data.get('clear'));result={'saved':True}
                     elif path=='/api/answer':store.answer_question(data['id'],data['value'],data.get('fact_key'));result={'saved':True}
                     elif path=='/api/material-review':
                         from .materials import review_material

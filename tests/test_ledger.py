@@ -61,6 +61,7 @@ def test_export_complete_unicode_csv_without_answers_and_neutralizes_formulas(st
     by_company = {row['Company']: row for row in rows}
     assert 'Café Labs' in by_company
     assert all("'" + company in by_company for company in companies[1:])
+    assert all(row['Fit score'] == '0' for row in rows)
     assert all(row['Role'] == 'Software, Research' for row in rows)
     assert all(row['Location'] == 'New York\nRemote' for row in rows)
 

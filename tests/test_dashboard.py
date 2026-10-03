@@ -442,3 +442,30 @@ def test_essential_facts_optional_toggle_and_provider_fields(tmp_path):
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             browser.close()
     finally: process.terminate(); process.join(5)
+
+
+def test_clearing_optional_fact_stops_reuse_and_survives_reload(store):
+    from playwright.sync_api import sync_playwright, expect
+    store.put_facts({'preferred_name': 'Previous nickname'})
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page()
+            page.goto(base + '/#token=fixture-capability')
+            page.locator('[data-view=profile]').click(); page.locator('#show-optional-facts').check()
+            field = page.locator('#facts-form [name=preferred_name]')
+            expect(field).to_have_value('Previous nickname'); field.fill('')
+            page.locator('#confirm-facts').check()
+            page.get_by_role('button', name='Save confirmed facts', exact=True).click()
+            expect(page.locator('#notice')).to_contain_text('Cleared values will no longer be reused')
+            assert 'preferred_name' not in store.facts() and store.settings()['live_enabled']
+            page.reload(); page.locator('[data-view=profile]').click(); page.locator('#show-optional-facts').check()
+            expect(field).to_have_value('')
+            assert store.facts(False)['preferred_name']['source'] == 'revoked'
+            browser.close()
+    finally: process.terminate(); process.join(5)
