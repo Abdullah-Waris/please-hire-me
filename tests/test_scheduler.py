@@ -5,7 +5,7 @@ import plistlib
 from hireme.scheduler import install,LABEL
 
 
-def test_mac_schedule_preserves_claude_connection_in_private_plist_not_argv(store,tmp_path,monkeypatch):
+def test_mac_schedule_excludes_api_key_from_private_plist(store,tmp_path,monkeypatch):
     monkeypatch.setattr('hireme.scheduler.sys.platform','darwin')
     monkeypatch.setattr(Path,'home',classmethod(lambda cls:tmp_path))
     monkeypatch.setenv('ANTHROPIC_API_KEY','synthetic-key')
@@ -16,7 +16,8 @@ def test_mac_schedule_preserves_claude_connection_in_private_plist_not_argv(stor
     path=Path(install(store,tmp_path/'repo with spaces'))
     data=plistlib.loads(path.read_bytes())
     assert data['Label']==LABEL
-    assert data['EnvironmentVariables']['ANTHROPIC_API_KEY']=='synthetic-key'
+    assert 'ANTHROPIC_API_KEY' not in data['EnvironmentVariables']
+    assert 'CLAUDE_CODE_OAUTH_TOKEN' not in data['EnvironmentVariables']
     assert 'UNRELATED_SECRET' not in data['EnvironmentVariables']
     assert 'synthetic-key' not in ' '.join(data['ProgramArguments'])
     assert 'synthetic-key' not in ' '.join(' '.join(c) for c in calls)

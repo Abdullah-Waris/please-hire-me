@@ -4,11 +4,12 @@ import contextlib
 import hashlib
 import json
 import re
+import shutil
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
 
-from .answers import resolve,REFUSE
+from .answers import resolve,REFUSE,field_key
 from .discovery import ATS_HOSTS,PORTAL_HOSTS
 from .util import Blocked,digest,private_dir,public_host,safe_document
 
@@ -37,7 +38,10 @@ SNAPSHOT=r"""selector => {
   if(el.disabled || el.closest('[aria-hidden=true]') || (el.readOnly && el.tabIndex<0))return;
   let type=el.tagName==='SELECT'?'select':el.tagName==='TEXTAREA'?'textarea':el.getAttribute('role')==='combobox'?'combobox':el.type||'text';
   let indices=[index]; let question=label(el); let options=[]; let value=el.value||'';
+  let required=el.required||el.getAttribute('aria-required')==='true'||/\*/.test(question);
   if(type==='file'){
+   const upload=el.closest('.file-upload');
+   if(upload)required=required||/\*/.test(upload.innerText.split('\n')[0]);
    const identity=(el.id+' '+el.name).toLowerCase();
    if(/transcript/.test(identity))question='Transcript';
    else if(/resume|\bcv\b/.test(identity))question='Resume/CV';
@@ -52,7 +56,7 @@ SNAPSHOT=r"""selector => {
   }else if(type==='select'){options=Array.from(el.options).filter(o=>o.value&&!o.disabled).map(o=>o.textContent.trim())}
   else if(type==='checkbox'){options=['Yes','No'];value=el.checked?'Yes':'No'}
   out.push({index,indices,ref:reference(el),refs:indices.map(i=>reference(controls[i])),label:question.replace(/\s+/g,' ').trim(),type,options,
-   required:el.required||el.getAttribute('aria-required')==='true'||/\*/.test(question),
+   required:required||/\*/.test(question),
    maxlength:el.maxLength||-1,value,multiple:!!el.multiple});
  });return out;
 }"""
@@ -71,6 +75,11 @@ class Browser:
         s=self.store.settings(); profile=private_dir(self.store.root/"browser")
         kwargs={"headless":s["headless"],"accept_downloads":False,"service_workers":"block"}
         if s["browser_channel"]=="chrome": kwargs["channel"]="chrome"
+        elif s["browser_channel"]=="system-chromium":
+            executable=shutil.which('chromium') or shutil.which('chromium-browser')
+            if not executable:
+                self.playwright.stop();raise Blocked('browser_unavailable','Install the system Chromium package')
+            kwargs['executable_path']=executable
         try:self.context=self.playwright.chromium.launch_persistent_context(str(profile),**kwargs)
         except Exception:
             self.playwright.stop(); raise Blocked("browser_unavailable","Install Chrome or choose Chromium in settings; close the dedicated sign-in window")
@@ -91,6 +100,9 @@ class Browser:
         if self.playwright:self.playwright.stop()
 
     def _route(self,route):
+        if not self.attempted:
+            try:self.store.checkpoint()
+            except Blocked:return route.abort()
         url=route.request.url; p=urlsplit(url)
         if self.test_url and url.startswith(self.test_url):return route.continue_()
         host=p.hostname
@@ -106,7 +118,7 @@ class Browser:
           "www.recaptcha.net","recaptcha.google.com","cdn.jsdelivr.net","cdnjs.cloudflare.com",
           "static.ashbyhq.com","api.ashbyhq.com","app.ashbyhq.com","cdn.ashbyprd.com","storage.googleapis.com","cdn.greenhouse.io",
           "job-boards.cdn.greenhouse.io","job-boards.eu.cdn.greenhouse.io",
-          "boards-api.greenhouse.io","boards.cdn.greenhouse.io","email-address-validator.us.greenhouse.io","email-address-validator.eu.greenhouse.io","api.lever.co","static.lever.co",
+          "api-geocode-earth-proxy.greenhouse.io","boards-api.greenhouse.io","boards.cdn.greenhouse.io","email-address-validator.us.greenhouse.io","email-address-validator.eu.greenhouse.io","api.lever.co","static.lever.co",
           "cdn.lever.co","lever-client-assets.s3.amazonaws.com","lever-client-logos.s3.us-west-2.amazonaws.com",
           "assets.workable.com","apply.workable.com"}
         recruiting_asset=bool(re.fullmatch(r"s[0-9]+-recruiting\.cdn\.greenhouse\.io",host))
@@ -156,7 +168,8 @@ class Browser:
         # Network idle is a bounded hydration aid, not a requirement on analytics-heavy sites.
         with contextlib.suppress(Exception):self.page.wait_for_load_state('networkidle',timeout=4000)
 
-    def _guard(self,job):
+    def _guard(self,job,allow_verification=False):
+        if not self.attempted:self.store.checkpoint()
         if self.denied_write:raise Blocked("unapproved_draft_write","An unsupported page attempted to save data before submit authorization")
         url=self.page.url; host=urlsplit(url).hostname
         if self.test_url and url.startswith(self.test_url):pass
@@ -167,14 +180,65 @@ class Browser:
             raise Blocked("captcha_blocked")
         text=self.page.locator('body').inner_text(timeout=5000)
         if re.search(r"(?:job|position|posting).{0,40}(?:no longer available|no longer accepting|has expired|has been filled)",text,re.I):raise Blocked("expired_posting")
-        if LOGIN.search(text):raise Blocked("account_or_verification_blocked")
+        if LOGIN.search(text) and not (allow_verification and self._email_verification(text)):raise Blocked("account_or_verification_blocked")
         if REFUSE.search(text):raise Blocked("human_work_sample")
         return text
+
+    def _email_verification(self, text):
+        return bool(re.search(r'verification code was sent.{0,300}to submit your application',text,re.I|re.S)
+                    and self.page.get_by_label('Security code',exact=True).count())
+
+    def _continue_email_verification(self,job,submit):
+        if not self.store.settings()['gmail_verification']:return 'awaiting_verification'
+        greenhouse={'boards.greenhouse.io','job-boards.greenhouse.io','boards.eu.greenhouse.io','job-boards.eu.greenhouse.io'}
+        if not self.test_url and job['host'] not in greenhouse:return 'awaiting_verification'
+        from .gmail import GmailClient
+        challenge=self.store.db.execute('SELECT * FROM verification_challenges WHERE application_id=?',(self.aid,)).fetchone()
+        try:client=GmailClient(self.store)
+        except Blocked as e:
+            if e.reason=='paused':raise
+            self.store.event('verification_held',self.aid,{'reason':e.reason});return 'awaiting_verification'
+        except Exception as e:
+            self.store.event('verification_held',self.aid,{'reason':type(e).__name__});return 'awaiting_verification'
+        deadline=time.monotonic()+self.store.settings()['gmail_code_wait_seconds']
+        code=None
+        while time.monotonic()<deadline:
+            self.store.checkpoint()
+            try:code=client.find_code(job['company'],challenge['requested'],self.aid,challenge['code_length'])
+            except Blocked as e:
+                if e.reason=='paused':raise
+                self.store.event('verification_held',self.aid,{'reason':e.reason});return 'awaiting_verification'
+            except Exception as e:
+                self.store.event('verification_held',self.aid,{'reason':type(e).__name__});return 'awaiting_verification'
+            if code:break
+            self.page.wait_for_timeout(1000)
+        if not code:
+            self.store.event('verification_held',self.aid,{'reason':'verification_mail_not_found'})
+            return 'awaiting_verification'
+        self._guard(job,allow_verification=True)
+        control=self.page.get_by_label('Security code',exact=True)
+        if control.count()!=1:raise Blocked('verification_form_changed')
+        control.fill(code)
+        self.store.checkpoint()
+        self.store.begin_verification(self.aid)
+        submit.click(timeout=15000)
+        self.page.wait_for_timeout(1200)
+        text=self._guard(job,allow_verification=True)
+        screenshot=self.store.root/'screenshots'/(self.aid+'-verified.jpg')
+        # A rejected code may remain visible. Do not persist it in screenshots/text.
+        screenshot_kwargs={'mask':[control]} if control.count() else {}
+        self.page.screenshot(path=str(screenshot),type='jpeg',full_page=True,**screenshot_kwargs)
+        text=text.replace(code,'[verification code redacted]')
+        confirmed=CONFIRMED.search(text) and not self.page.locator('input[type=email]').count()
+        outcome='confirmed' if confirmed else 'awaiting_verification' if self._email_verification(text) else 'unknown'
+        self.store.finish(self.aid,outcome,text,screenshot.name)
+        return outcome
 
     def _snapshot(self):
         fields=self.page.evaluate(SNAPSHOT,CONTROLS)
         # Custom dropdown option enumeration is a read task, before any personal value is filled.
         for f in fields:
+            self.store.checkpoint()
             if f['type']=='combobox':
                 el=self._control(f)
                 try:
@@ -186,6 +250,8 @@ class Browser:
                     elif not f['value']:
                         f['value']=el.evaluate("""e=>{
                           for(let n=e.parentElement,depth=0;n&&depth<5;n=n.parentElement,depth++){
+                            const chips=n.querySelectorAll('[class*=multi-value__label],[class*=multiValueLabel]');
+                            if(chips.length)return Array.from(chips).map(x=>x.textContent.trim()).join('\\n');
                             const values=n.querySelectorAll('[class*=singleValue],[class*=single-value]');
                             if(values.length===1){
                               const flag=values[0].querySelector('[class*=iti__flag]');
@@ -198,13 +264,24 @@ class Browser:
                               return values[0].textContent.trim();
                             }
                           }return e.textContent.trim();}""")
+                    if field_key(f['label']) in ('school','location') and el.evaluate('(e)=>e.tagName==="INPUT"'):
+                        key=field_key(f['label']);fact=self.store.facts().get(key)
+                        if fact:
+                            original=el.input_value()
+                            found=list(f['options'])
+                            for query in dict.fromkeys((fact['value'],fact['value'].split(',')[0] if key=='location' else 'Berkeley' if 'berkeley' in fact['value'].casefold() else fact['value'])):
+                                self.store.checkpoint();el.fill(query);self.page.wait_for_timeout(1200)
+                                found.extend(x.strip() for x in self._menu(el).get_by_role('option').all_text_contents() if x.strip())
+                            el.fill(original)
+                            f['options']=sorted(set(found))
                     el.press('Escape')
+                except Blocked:raise
                 except Exception:raise Blocked('unsupported_widget',f['label'])
         return fields
 
     @staticmethod
     def _shape(fields):
-        return [{k:v for k,v in f.items() if k not in ('value','index','indices','ref','refs')} for f in fields]
+        return [{k:v for k,v in f.items() if k not in ('value','index','indices','ref','refs') and not (k=='options' and f['type']=='combobox')} for f in fields]
 
     def _menu(self, el):
         for name in ('aria-controls','aria-owns'):
@@ -246,7 +323,7 @@ class Browser:
         elif f['type']=='checkbox':el.set_checked(value=='Yes')
         elif f['type']=='combobox':
             el.click()
-            if el.evaluate('(e)=>e.tagName==="INPUT"'):el.fill(value)
+            if el.evaluate('(e)=>e.tagName==="INPUT"'):el.fill(value.split(',')[0] if field_key(f['label'])=='location' else value)
             self._menu(el).get_by_role('option',name=value,exact=True).click()
         else:
             if f['type']!='textarea' and '\n' in value:raise Blocked('invalid_single_line_answer',f['label'])
@@ -257,7 +334,9 @@ class Browser:
         body=self.page.locator('body').inner_text()
         completed={d['field']['label'] for d in documents if d['hash'] in self.uploaded_files and d['filename'] in body}
         def remaining(items):return [f for f in items if not (f['type']=='file' and f['label'] in completed)]
-        if digest(self._shape(remaining(fresh)))!=digest(self._shape(remaining(fields))):raise Blocked('form_changed')
+        if digest(self._shape(remaining(fresh)))!=digest(self._shape(remaining(fields))):
+            self.store.event('form_changed',self.current_host,{'before':self._shape(remaining(fields)),'after':self._shape(remaining(fresh))})
+            raise Blocked('form_changed')
         for a in answers:
             f=a['field']; el=self._control(f); value=a['value']
             if f['type']=='select':actual=el.locator('option:checked').inner_text().strip()
@@ -304,24 +383,37 @@ class Browser:
                 apply.click();self._wait_ready();continue
             answers=[]; documents=[]; pending=[]
             for f in fields:
+                self.store.checkpoint()
                 if not f['label']:
                     if f['required']:raise Blocked('unlabeled_required_field')
                     continue
                 if f['type']=='file':
-                    kind='transcript' if re.search(r'transcript',f['label'],re.I) else 'resume' if re.search(r'resume|cv',f['label'],re.I) else None
+                    kind='transcript' if re.search(r'transcript',f['label'],re.I) else 'resume' if re.search(r'resume|cv',f['label'],re.I) else 'cover_letter' if re.search(r'cover.?letter',f['label'],re.I) else None
                     doc=self.store.db.execute('SELECT * FROM documents WHERE kind=?',(kind,)).fetchone()
+                    if kind=='cover_letter' and f['required']:
+                        try:
+                            from .letters import generate_cover_letter
+                            from .provider import LazyProvider
+                            doc=generate_cover_letter(self.store,job,LazyProvider(self.store.settings()['model_timeout_seconds'],store=self.store,checkpoint=self.store.checkpoint,observer=lambda stage,detail:self.store.event(stage,job['id'],detail)))
+                        except Blocked as e:
+                            if e.reason in ('paused','model_budget_exhausted','provider_rate_limited'):raise
+                            self.store.event('document_blocked',job['id'],{'label':f['label'],'reason':e.reason,'detail':e.detail})
+                            pending.append((f,e.reason));continue
                     if not doc:
                         if f['required']:pending.append((f,'missing_document'))
                         continue
                     documents.append({**dict(doc),'field':f});continue
                 try:
                     from .provider import LazyProvider
-                    provider=LazyProvider(self.store.settings()['model_timeout_seconds'])
+                    provider=LazyProvider(self.store.settings()['model_timeout_seconds'],store=self.store,checkpoint=self.store.checkpoint,observer=lambda stage,detail:self.store.event(stage,job['id'],detail))
                     a=resolve(self.store,job['answer_scope'],f,provider,context={**job,'form_questions':[x['label'] for x in fields],'previous_templates':[x['provenance']['template_id'] for x in answers if 'template_id' in x['provenance']]})
-                    if a:answers.append(a)
+                    if a:
+                        answers.append(a)
+                        self.store.event('field_answered',job['id'],{'label':f['label'],'value':a['value'],'provenance':a['provenance']})
                     elif f['value']:raise Blocked('unknown_prefilled_value',f['label'])
                 except Blocked as e:
-                    if e.reason=='human_work_sample':raise
+                    if e.reason in ('human_work_sample','paused','model_budget_exhausted','provider_rate_limited'):raise
+                    self.store.event('field_blocked',job['id'],{'label':f['label'],'options':f['options'],'required':f['required'],'reason':e.reason})
                     if not f['required'] and not f['value']:
                         self.store.resolve_known_question(job['answer_scope'],f['label']);continue
                     self.store.ask(job['id'],job['answer_scope'],f['label'],f['options'],e.reason)
@@ -334,7 +426,10 @@ class Browser:
                 self._control(d['field']).set_input_files(str(path))
             if documents:
                 with contextlib.suppress(Exception):self.page.wait_for_load_state('networkidle',timeout=8000)
-            for a in answers:self._fill(a)
+            for a in answers:
+                self.store.checkpoint()
+                self.store.event('field_filling',job['id'],{'label':a['field']['label']})
+                self._fill(a)
             self._verify(answers,documents,fields)
             self._guard(job)
             all_answers.extend(answers);all_docs.extend(documents)
@@ -357,18 +452,27 @@ class Browser:
             # The committed intent is immediately before the only final click.
             self._guard(job)
             self._verify(answers,documents,fields)
+            self.store.checkpoint()
             self.store.begin_submit(self.aid); self.attempted=True
+            requested=time.time()
             try:
                 submit.click(timeout=15000)
                 self.page.wait_for_timeout(1200)
-                text=self._guard(job)
+                text=self._guard(job,allow_verification=True)
                 screenshot=self.store.root/'screenshots'/(self.aid+'-after.jpg')
                 self.page.screenshot(path=str(screenshot),type='jpeg',full_page=True)
                 confirmed=CONFIRMED.search(text) and not self.page.locator('input[type=email]').count()
-                self.store.finish(self.aid,'confirmed' if confirmed else 'unknown',text[:4000],screenshot.name)
-                return 'confirmed' if confirmed else 'unknown'
+                outcome='confirmed' if confirmed else 'awaiting_verification' if self._email_verification(text) else 'unknown'
+                evidence=text if outcome=='awaiting_verification' else text[:4000]
+                if outcome=='awaiting_verification':
+                    self.store.db.execute('INSERT OR REPLACE INTO verification_challenges VALUES(?,?,?,?,?,?,?,0)',
+                        (self.aid,'greenhouse',self.page.url,job['company'],requested,8,'pending'))
+                self.store.finish(self.aid,outcome,evidence,screenshot.name)
+                if outcome=='awaiting_verification':return self._continue_email_verification(job,submit)
+                return outcome
             except Exception as e:
                 outcome=self.store.db.execute('SELECT state FROM applications WHERE id=?',(self.aid,)).fetchone()
                 if outcome and outcome[0]=='submitting':self.store.finish(self.aid,'unknown',f'{type(e).__name__}: outcome requires verification')
+                if isinstance(e,Blocked) and e.reason=='paused':raise
                 raise Blocked('submission_unknown')
         raise Blocked('unsupported_form','Step limit reached')

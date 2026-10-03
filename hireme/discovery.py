@@ -9,7 +9,7 @@ from pathlib import Path
 from urllib.parse import urlsplit
 
 from .net import Network,SafeRedirect
-from .util import canonical_url,digest,now
+from .util import canonical_url,digest,now,Blocked
 
 ATS_HOSTS={"jobs.ashbyhq.com","boards.greenhouse.io","job-boards.greenhouse.io","boards.eu.greenhouse.io",
  "job-boards.eu.greenhouse.io","jobs.lever.co","jobs.eu.lever.co","apply.workable.com","jobs.smartrecruiters.com"}
@@ -103,9 +103,11 @@ def sweep_boards(store,repo,ats=None,limit=None,deadline_seconds=1800):
     n=0
     with concurrent.futures.ThreadPoolExecutor(max_workers=store.settings()["discovery_workers"]) as pool:
         for offset in range(0,len(sources),store.settings()["discovery_workers"]):
+            store.checkpoint()
             if time.monotonic()>net.deadline: break
             batch={pool.submit(probe,net,a,s):(a,s) for a,s in sources[offset:offset+store.settings()["discovery_workers"]]}
             for future in concurrent.futures.as_completed(batch):
+                store.checkpoint()
                 sid=":".join(batch[future])
                 try:
                     jobs=future.result(); source_result(store,sid,jobs); n+=len(jobs)
@@ -116,8 +118,9 @@ def sweep_boards(store,repo,ats=None,limit=None,deadline_seconds=1800):
 def sweep_lists(store,net=None):
     import http.cookiejar
     import urllib.request
-    net=net or Network(time.monotonic()+600)
+    net=net or Network(time.monotonic()+600,checkpoint=store.checkpoint)
     for name,repo in (("new-grad","SimplifyJobs/New-Grad-Positions"),("internships","SimplifyJobs/Summer2027-Internships")):
+        store.checkpoint()
         jobs=[]; sid="simplify:"+name
         try:
             data=net.json(f"https://raw.githubusercontent.com/{repo}/dev/.github/scripts/listings.json")
@@ -127,11 +130,15 @@ def sweep_lists(store,net=None):
                                         "Sponsorship: "+str(j.get("sponsorship") or ""),terms=j.get("terms") or []))
                 except (ValueError,KeyError,TypeError): continue
             source_result(store,sid,jobs)
+        except Blocked as e:
+            if e.reason=="paused":raise
+            source_result(store,sid,error=e)
         except Exception as e: source_result(store,sid,error=e)
     boards=(("a16z","portfoliojobs.a16z.com","andreessen-horowitz"),("Sequoia","jobs.sequoiacap.com","sequoia-capital"),
         ("Lightspeed","jobs.lsvp.com","lightspeed"),("Kleiner Perkins","jobs.kleinerperkins.com","kleiner-perkins"),
         ("GV","jobs.gv.com","gv"),("Bessemer","jobs.bvp.com","bessemer-ventures"))
     for label,host,board in boards:
+        store.checkpoint()
         sid="consider:"+label; jobs=[]
         try:
             jar=http.cookiejar.CookieJar()
@@ -141,6 +148,7 @@ def sweep_lists(store,net=None):
             if not token: raise ValueError("CSRF token missing; source changed")
             seq=None
             for _ in range(20):
+                store.checkpoint()
                 body={"meta":{"size":100,**({"sequence":seq} if seq else {})},"board":{"id":board,"isParent":True},"query":{},"grouped":False}
                 d=json.loads(net.fetch(f"https://{host}/api-boards/search-jobs",body,{"x-csrf-token":token[1]},op))
                 for j in d.get("jobs") or []:
@@ -154,14 +162,20 @@ def sweep_lists(store,net=None):
                 next_seq=(d.get("meta") or {}).get("sequence")
                 if not next_seq or next_seq==seq or not d.get("jobs"): break
                 seq=next_seq
+        except Blocked as e:
+            if e.reason=="paused":raise
+            source_result(store,sid,jobs,error=e)
         except Exception as e: source_result(store,sid,jobs,error=e)
 
 
 def sweep_portals(store,net=None):
     from .portals import collect
-    net=net or Network(time.monotonic()+600)
+    net=net or Network(time.monotonic()+600,checkpoint=store.checkpoint)
+    store.checkpoint()
     rows,errors=collect(net)
+    store.checkpoint()
     for r in rows:
+        store.checkpoint()
         try: store.upsert_job(posting(r[5],r[0],r[3],r[4],"portal:"+r[0]))
         except (ValueError,TypeError): continue
     source_result(store,"portals",[],error="; ".join(errors) if errors else None)

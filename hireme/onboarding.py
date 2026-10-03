@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 from .config import FACTS, validate_fact
-from .util import private_dir
+from .util import private_dir,write_private_blob
 
 
 def import_resume(store,path:Path,kind='resume'):
@@ -18,12 +18,15 @@ def import_resume(store,path:Path,kind='resume'):
     from pypdf import PdfReader
     reader=PdfReader(path)
     if reader.is_encrypted or len(reader.pages)>50:raise ValueError('Encrypted or excessive PDF')
-    text='\n'.join(p.extract_text() or '' for p in reader.pages)
+    parts=[];length=0
+    for page in reader.pages:
+        part=page.extract_text() or '';length+=len(part)
+        if length>100000:raise ValueError('PDF text exceeds 100,000 characters')
+        parts.append(part)
+    text='\n'.join(parts)
     if kind=='resume' and not text.strip():raise ValueError('Resume needs selectable text; supply an accessible text PDF')
     h=hashlib.sha256(data).hexdigest();dest=private_dir(store.root/'documents')/(h+'.pdf')
-    fd=os.open(dest,os.O_WRONLY|os.O_CREAT|os.O_EXCL|os.O_NOFOLLOW,0o600) if not dest.exists() else None
-    if fd is not None:
-        with os.fdopen(fd,'wb') as f:f.write(data)
+    write_private_blob(dest,data)
     store.db.execute('INSERT INTO documents VALUES(?,?,?) ON CONFLICT(kind) DO UPDATE SET hash=excluded.hash,filename=excluded.filename',(kind,h,dest.name))
     store.event('document_imported',kind,{'hash':h})
     candidates={}

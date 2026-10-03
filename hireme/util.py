@@ -86,3 +86,24 @@ def safe_document(path: Path, root: Path) -> Path:
     if not resolved.read_bytes().startswith(b"%PDF-"):
         raise ValueError("Not a PDF")
     return resolved
+
+
+def write_private_blob(path: Path, data: bytes) -> None:
+    """Immutable content-addressed bytes, durable before their database reference."""
+    private_dir(path.parent)
+    if path.is_symlink():raise ValueError('Unsafe private file')
+    if path.exists():
+        if path.read_bytes()!=data:raise ValueError('Private file was modified')
+        return
+    fd,tmp=tempfile.mkstemp(dir=path.parent,prefix='.blob-')
+    try:
+        with os.fdopen(fd,'wb') as f:
+            f.write(data);f.flush();os.fsync(f.fileno())
+        try:os.link(tmp,path)
+        except FileExistsError:
+            if path.is_symlink() or path.read_bytes()!=data:raise ValueError('Private file changed concurrently')
+        directory_fd=os.open(path.parent,os.O_RDONLY)
+        try:os.fsync(directory_fd)
+        finally:os.close(directory_fd)
+    finally:
+        Path(tmp).unlink(missing_ok=True)

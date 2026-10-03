@@ -4,13 +4,14 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "please-hire-me"
-version = "0.3.0"
+version = "0.4.0"
 description = "Automatic applications with verified facts and durable submission tracking"
 requires-python = ">=3.11"
-dependencies = ["playwright>=1.55,<2", "pypdf>=6,<7"]
+dependencies = ["playwright>=1.55,<2", "pypdf>=6,<7", "reportlab>=4.4,<5", "jsonschema>=4.25,<5"]
 
 [project.optional-dependencies]
-test = ["pytest>=8,<10"]
+gmail = ["google-api-python-client>=2.180,<3", "google-auth-oauthlib>=1.2,<2"]
+test = ["pytest>=8,<10", "PyMuPDF>=1.26,<2"]
 
 [project.scripts]
 hireme = "hireme.cli:main"

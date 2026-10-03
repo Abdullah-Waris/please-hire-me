@@ -14,20 +14,27 @@ from .util import Blocked,now
 from .store import worker_lock
 
 
-def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser):
+def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,max_attempts=None,job_ids=None):
     with worker_lock(store.root):
         store.recover()
-        rid=uuid.uuid4().hex; s=store.settings(); count=0; reasons={}; start=time.monotonic()
+        store.run_generation=store.control_generation() if live else None
+        rid=uuid.uuid4().hex; s=store.settings(); count=0; attempts=0; reasons={}; outcomes={}; start=time.monotonic()
+        store.active_run_id=rid
+        max_attempts=min(max_attempts or s['max_attempts_per_cycle'],s['max_attempts_per_cycle'])
         store.db.execute("INSERT INTO runs(id,started,status) VALUES(?,?,'running')",(rid,now()))
         try:
             if store.missing_setup() or not s['onboarding_complete']:
                 raise Blocked('setup_incomplete',', '.join(store.missing_setup()))
             if live and not s['live_enabled']:raise Blocked('paused')
             if discover:
-                sweep_lists(store); sweep_portals(store); sweep_boards(store,repo)
+                store.checkpoint(); sweep_lists(store)
+                store.checkpoint(); sweep_portals(store)
+                store.checkpoint(); sweep_boards(store,repo)
             rows=list(store.db.execute("SELECT * FROM jobs WHERE status IN ('discovered','blocked','prepared') ORDER BY score DESC,first_seen DESC"))
             ranked=[]
             for row in rows:
+                store.checkpoint()
+                if job_ids and row['id'] not in job_ids:continue
                 job=json.loads(row['payload'])
                 try:
                     score,evidence=eligible(job,s,store.facts())
@@ -46,27 +53,45 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser)
                 with worker_lock(store.root,'browser'):
                     with browser_factory(store) as browser:
                         for _,job in sorted(ranked,key=lambda x:x[0],reverse=True):
-                            if count>=target or time.monotonic()-start>s['cycle_timeout_seconds']:break
-                            if not store.settings()['live_enabled'] and live:raise Blocked('paused')
+                            if count>=target or (max_attempts is not None and attempts>=max_attempts) or time.monotonic()-start>s['cycle_timeout_seconds']:break
+                            store.checkpoint()
                             try:
+                                attempts+=1
+                                store.event('application_started',job['id'],{'run_id':rid,'attempt':attempts,'company':job['company'],'title':job['title']})
                                 outcome=browser.apply(job,live=live)
+                                outcomes[outcome]=outcomes.get(outcome,0)+1
+                                store.event('application_finished',job['id'],{'run_id':rid,'outcome':outcome})
                                 store.db.execute('UPDATE jobs SET status=? WHERE id=?',(outcome,job['id']))
                                 if outcome=='confirmed' or not live and outcome=='prepared':count+=1
                             except Blocked as e:
+                                if e.reason in ('paused','model_budget_exhausted','provider_rate_limited'):raise
+                                store.event('application_finished',job['id'],{'run_id':rid,'outcome':'blocked','reason':e.reason,'detail':e.detail})
                                 reasons[e.reason]=reasons.get(e.reason,0)+1
                                 # Unknown outcomes must retain their distinct state.
                                 state=store.db.execute('SELECT state FROM applications WHERE job_id=?',(job['id'],)).fetchone()
-                                if not state or state[0] not in ('unknown','submitting'):store.block(job['id'],e.reason,e.detail)
+                                if not state or state[0] not in ('unknown','submitting','awaiting_verification'):store.block(job['id'],e.reason,e.detail)
                             except Exception as e:
+                                store.checkpoint()
+                                store.event('application_finished',job['id'],{'run_id':rid,'outcome':'error','error':type(e).__name__,'detail':str(e)[:1200]})
                                 reasons['browser_error']=reasons.get('browser_error',0)+1
                                 store.block(job['id'],'browser_error',type(e).__name__)
-            detail=json.dumps({'target':target,'confirmed':count,'shortfall':max(0,target-count),'reasons':reasons,'mode':'live' if live else 'prepare'})
+            detail=json.dumps({'target':target,'attempts':attempts,'outcomes':outcomes,'confirmed':count,'shortfall':max(0,target-count),'reasons':reasons,'mode':'live' if live else 'prepare'})
             store.db.execute("UPDATE runs SET finished=?,status='finished',submitted=?,detail=? WHERE id=?",(now(),count if live else 0,detail,rid))
             return json.loads(detail)
         except Exception as e:
             store.recover()
-            store.db.execute("UPDATE runs SET finished=?,status='blocked',detail=? WHERE id=?",(now(),str(e),rid))
+            status='paused' if isinstance(e,Blocked) and e.reason=='paused' else 'blocked'
+            store.db.execute("UPDATE runs SET finished=?,status=?,submitted=?,detail=? WHERE id=?",(now(),status,count if live else 0,json.dumps({'confirmed':count if live else 0,'attempts':attempts,'reason':str(e),'mode':'live' if live else 'prepare'}),rid))
             raise
+        finally:
+            store.run_generation=None
+            store.active_run_id=None
+            try:
+                from .reports import queue_report,flush_reports
+                queue_report(store,rid)
+                if live:flush_reports(store)
+            except Exception as e:
+                store.event('batch_report_failed',rid,{'reason':getattr(e,'reason',type(e).__name__)})
 
 
 def daemon(store,repo):

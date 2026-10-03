@@ -132,3 +132,12 @@ def test_saved_fact_binding_goes_stale(store,job):
     # Other identity fields are editable, but an identity with submission history is protected.
     store.put_facts({'email':'another@candidate.invalid'})
     with pytest.raises(Blocked,match='stale'):resolve(store,job['host'],f)
+
+
+def test_email_verification_is_pending_and_never_retried(store,job,package):
+    aid=store.prepare(job,package);store.begin_submit(aid)
+    store.finish(aid,'awaiting_verification','Enter the security code from your email')
+    assert store.db.execute('SELECT status FROM jobs WHERE id=?',(job['id'],)).fetchone()[0]=='awaiting_verification'
+    with pytest.raises(Blocked):store.prepare(job,package)
+    store.reconcile(aid,False,'Portal verification challenge expired before final submission')
+    with pytest.raises(Blocked):store.prepare(job,package)

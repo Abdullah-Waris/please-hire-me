@@ -14,6 +14,11 @@ from .config import DEFAULTS, REQUIRED, validate_fact, validate_settings
 from .util import Blocked, atomic_json, company_key, digest, now, private_dir
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS model_requests (id INTEGER PRIMARY KEY, timestamp TEXT NOT NULL, run_id TEXT NOT NULL, provider TEXT NOT NULL);
+CREATE INDEX IF NOT EXISTS model_requests_time ON model_requests(timestamp);
+CREATE INDEX IF NOT EXISTS model_requests_run ON model_requests(run_id);
+CREATE TABLE IF NOT EXISTS worker_control (id INTEGER PRIMARY KEY CHECK(id=1), generation INTEGER NOT NULL);
+INSERT OR IGNORE INTO worker_control VALUES(1,0);
 CREATE TABLE IF NOT EXISTS config (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS facts (key TEXT PRIMARY KEY, value TEXT NOT NULL, source TEXT NOT NULL,
  confirmed INTEGER NOT NULL, revision INTEGER NOT NULL, updated TEXT NOT NULL);
@@ -23,7 +28,22 @@ CREATE TABLE IF NOT EXISTS answers (id TEXT PRIMARY KEY, question TEXT NOT NULL,
 CREATE TABLE IF NOT EXISTS writing_answers (id TEXT PRIMARY KEY, body TEXT NOT NULL, provenance TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS field_bindings (id TEXT PRIMARY KEY, host TEXT NOT NULL, label TEXT NOT NULL,
  options TEXT NOT NULL, fact_key TEXT, template_id TEXT, created TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS verification_challenges (application_id TEXT PRIMARY KEY, provider TEXT NOT NULL,
+ url TEXT NOT NULL, company TEXT NOT NULL, requested REAL NOT NULL, code_length INTEGER NOT NULL,
+ state TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0);
+CREATE TABLE IF NOT EXISTS report_outbox (id TEXT PRIMARY KEY, recipient TEXT NOT NULL, subject TEXT NOT NULL,
+ body TEXT NOT NULL, message_id TEXT NOT NULL UNIQUE, state TEXT NOT NULL, created TEXT NOT NULL,
+ attempts INTEGER NOT NULL, provider_id TEXT, sent TEXT, last_error TEXT);
+CREATE TABLE IF NOT EXISTS mail_consumptions (message_id TEXT PRIMARY KEY, challenge_id TEXT NOT NULL,
+ consumed REAL NOT NULL);
+CREATE TABLE IF NOT EXISTS materials (id TEXT PRIMARY KEY, hash TEXT NOT NULL, filename TEXT NOT NULL,
+ original_name TEXT NOT NULL, media_type TEXT NOT NULL, kind TEXT NOT NULL, text TEXT NOT NULL,
+ confirmed INTEGER NOT NULL, role TEXT NOT NULL, revision INTEGER NOT NULL, created TEXT NOT NULL,
+ updated TEXT NOT NULL, UNIQUE(hash,kind));
 CREATE TABLE IF NOT EXISTS documents (kind TEXT PRIMARY KEY, hash TEXT NOT NULL, filename TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS generated_documents (job_id TEXT NOT NULL, kind TEXT NOT NULL,
+ hash TEXT NOT NULL, filename TEXT NOT NULL, fingerprint TEXT NOT NULL, provenance TEXT NOT NULL,
+ created TEXT NOT NULL, PRIMARY KEY(job_id,kind));
 CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, company TEXT NOT NULL, company_key TEXT NOT NULL,
  title TEXT NOT NULL, url TEXT UNIQUE NOT NULL, host TEXT NOT NULL, source TEXT NOT NULL,
  payload TEXT NOT NULL, score INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'discovered',
@@ -72,6 +92,24 @@ class Store:
     def settings(self):
         return validate_settings(json.loads(self.db.execute("SELECT value FROM config").fetchone()[0]))
 
+    def control_generation(self):
+        return self.db.execute('SELECT generation FROM worker_control WHERE id=1').fetchone()[0]
+
+    def checkpoint(self):
+        generation=getattr(self,'run_generation',None)
+        if generation is not None and (generation!=self.control_generation() or not self.settings()['live_enabled']):
+            raise Blocked('paused')
+
+    def reserve_model_request(self):
+        with self.transaction():
+            self.checkpoint()
+            s=self.settings();rid=getattr(self,'active_run_id',None) or 'setup:'+datetime.now(ZoneInfo(s['timezone'])).date().isoformat()
+            today=datetime.now(ZoneInfo(s['timezone'])).date()
+            daily=sum(datetime.fromisoformat(r[0]).astimezone(ZoneInfo(s['timezone'])).date()==today for r in self.db.execute('SELECT timestamp FROM model_requests WHERE timestamp>=?',((datetime.now(timezone.utc)-timedelta(days=2)).isoformat(),)))
+            cycle=self.db.execute('SELECT count(*) FROM model_requests WHERE run_id=?',(rid,)).fetchone()[0]
+            if daily>=s['max_model_requests_per_day'] or cycle>=s['max_model_requests_per_cycle']:raise Blocked('model_budget_exhausted','Wait for the next batch/day or change your request limits')
+            self.db.execute('INSERT INTO model_requests(timestamp,run_id,provider) VALUES(?,?,?)',(now(),rid,s['provider']))
+
     def event(self, kind, subject, detail):
         self.db.execute("INSERT INTO events(timestamp,kind,subject,detail) VALUES(?,?,?,?)",
                         (now(), kind, str(subject), json.dumps(detail, ensure_ascii=False)))
@@ -81,6 +119,9 @@ class Store:
             s = validate_settings(changes, self.settings())
             if s["live_enabled"] and (not s["onboarding_complete"] or self.missing_setup()):
                 raise ValueError("Finish confirmed onboarding before enabling submissions")
+            if changes.get("live_enabled") is False:
+                self.db.execute("UPDATE worker_control SET generation=generation+1 WHERE id=1")
+                self.event("pause_requested", "worker", {})
             self.db.execute("UPDATE config SET value=? WHERE id=1", (json.dumps(s),))
             self.event("settings_updated", "config", changes)
         self.export_config()
@@ -172,7 +213,7 @@ class Store:
         r = self.db.execute("SELECT * FROM answers WHERE id=?",(qid,)).fetchone()
         if not r and '|' in host:
             # User-linked universal facts can be reused for identical wording/options at the same ATS.
-            universal={'full_name','first_name','last_name','email','phone','location','street','city','state','postal_code','country','linkedin','github','website','school','major','graduation','gpa','work_authorized_us','needs_sponsorship','citizenship','us_person','unrestricted_authorization','race','gender','veteran','disability','professional_years'}
+            universal={'full_name','first_name','last_name','email','phone','location','street','city','state','postal_code','country','linkedin','github','website','school','high_school','major','graduation','gpa','work_authorized_us','needs_sponsorship','citizenship','us_person','unrestricted_authorization','race','gender','veteran','disability','professional_years'}
             for candidate in self.db.execute("SELECT * FROM answers WHERE question=? AND options=? AND fact_key IS NOT NULL",(label,json.dumps(options))):
                 if candidate['host'].split('|',1)[0]==host.split('|',1)[0] and candidate['fact_key'] in universal:
                     r=candidate;break
@@ -221,13 +262,15 @@ class Store:
         ck=self.company(job["company"])
         if ck in {self.company(x) for x in s["skip_companies"]+s["interview_companies"]}:
             raise Blocked("company_blocked")
-        active = list(self.db.execute("SELECT * FROM applications WHERE company_key=? AND state IN ('submitting','unknown','confirmed')",(ck,)))
+        active = list(self.db.execute("SELECT * FROM applications WHERE company_key=? AND state IN ('submitting','unknown','confirmed','awaiting_verification')",(ck,)))
+        if any(r["state"]=="awaiting_verification" for r in active):
+            raise Blocked("company_verification_pending","Complete the earlier application verification first")
         if any(r["state"] in ("submitting","unknown") for r in active):
             raise Blocked("company_uncertain","Reconcile the earlier attempt first")
         if len(active)>=s["max_per_company"]:
             raise Blocked("company_limit")
         local_day=datetime.now(ZoneInfo(s["timezone"])).date()
-        all_active=list(self.db.execute("SELECT * FROM applications WHERE state IN ('submitting','unknown','confirmed')"))
+        all_active=list(self.db.execute("SELECT * FROM applications WHERE state IN ('submitting','unknown','confirmed','awaiting_verification')"))
         daily=[r for r in all_active if datetime.fromisoformat(r["attempted"] or r["created"]).astimezone(ZoneInfo(s["timezone"])).date()==local_day]
         if len(daily)>=s["max_per_day"]:
             raise Blocked("daily_limit")
@@ -257,6 +300,7 @@ class Store:
         from .answers import validate_package
         from .policy import eligible
         with self.transaction():
+            self.checkpoint()
             app=self.db.execute("SELECT * FROM applications WHERE id=?",(aid,)).fetchone()
             if not app or app["state"]!="prepared":
                 raise Blocked("invalid_transition")
@@ -274,18 +318,31 @@ class Store:
             self.event("submit_intent",aid,{"hash":app["hash"]})
         return package
 
+    def begin_verification(self,aid):
+        with self.transaction():
+            self.checkpoint()
+            if not self.settings()['live_enabled']:raise Blocked('paused')
+            app=self.db.execute('SELECT state FROM applications WHERE id=?',(aid,)).fetchone()
+            challenge=self.db.execute('SELECT * FROM verification_challenges WHERE application_id=?',(aid,)).fetchone()
+            if not app or app[0]!='awaiting_verification' or not challenge or challenge['state']!='pending' or challenge['attempts']>=1:
+                raise Blocked('verification_not_ready')
+            self.db.execute("UPDATE applications SET state='submitting',updated=? WHERE id=?",(now(),aid))
+            self.db.execute("UPDATE verification_challenges SET state='verifying',attempts=attempts+1 WHERE application_id=?",(aid,))
+            self.event('verification_intent',aid,{})
+
     def finish(self, aid, state, confirmation="", screenshot=""):
-        if state not in ("confirmed","unknown"):
+        if state not in ("confirmed","unknown","awaiting_verification"):
             raise ValueError("Invalid outcome")
         with self.transaction():
             r=self.db.execute("SELECT state,job_id FROM applications WHERE id=?",(aid,)).fetchone()
             if not r or r[0]!="submitting":
                 raise Blocked("invalid_transition")
             self.db.execute("UPDATE applications SET state=?,updated=?,confirmation=?,screenshot=? WHERE id=?",
-                            (state,now(),confirmation[:4000],screenshot,aid))
+                            (state,now(),confirmation[-4000:],screenshot,aid))
             self.db.execute("UPDATE jobs SET status=?,reason=?,updated=? WHERE id=?",
-                            (state,"" if state=="confirmed" else "Submission outcome needs reconciliation",now(),r[1]))
-            self.event(state,aid,{"confirmation":confirmation[:4000],"screenshot":screenshot})
+                            (state,"" if state=="confirmed" else "Email verification required; application not yet submitted" if state=="awaiting_verification" else "Submission outcome needs reconciliation",now(),r[1]))
+            self.db.execute("UPDATE verification_challenges SET state=? WHERE application_id=?",('complete' if state=='confirmed' else 'held' if state=='unknown' else 'pending',aid))
+            self.event(state,aid,{"confirmation":confirmation[-4000:],"screenshot":screenshot})
 
     def recover(self):
         with self.transaction():
@@ -293,6 +350,7 @@ class Store:
             for r in rows:
                 self.db.execute("UPDATE applications SET state='unknown',updated=? WHERE id=?",(now(),r[0]))
                 self.db.execute("UPDATE jobs SET status='unknown',reason='Worker stopped after submit intent',updated=? WHERE id=?",(now(),r[1]))
+                self.db.execute("UPDATE verification_challenges SET state='held' WHERE application_id=?",(r[0],))
                 self.event("crash_recovered",r[0],{"state":"unknown"})
             self.db.execute("UPDATE runs SET status='interrupted',finished=? WHERE status='running'",(now(),))
 
@@ -301,15 +359,16 @@ class Store:
             raise ValueError("Describe how you verified the outcome")
         with self.transaction():
             r=self.db.execute("SELECT state,job_id FROM applications WHERE id=?",(aid,)).fetchone()
-            if not r or r[0]!="unknown":
-                raise ValueError("Only unknown submissions can be reconciled")
+            if not r or r[0] not in ("unknown","awaiting_verification"):
+                raise ValueError("Only uncertain or verification-pending submissions can be reconciled")
             state="confirmed" if submitted else "not_submitted"
             self.db.execute("UPDATE applications SET state=?,confirmation=?,updated=? WHERE id=?",(state,note,now(),aid))
             self.db.execute("UPDATE jobs SET status=?,reason=?,updated=? WHERE id=?",(state,note,now(),r[1]))
             self.event("human_reconciliation",aid,{"submitted":submitted,"note":note})
         # A not-submitted outcome is deliberately not retried automatically.
 
-    def snapshot(self):
+    def snapshot(self,material_offset=0):
+        if type(material_offset) is not int or not 0<=material_offset<=1000000:raise ValueError("Invalid material page")
         def rows(q): return [dict(x) for x in self.db.execute(q)]
         return {"settings":self.settings(),"templates":self.templates(),"facts":self.facts(False),"missing_setup":self.missing_setup(),
                 "jobs":rows("SELECT * FROM jobs ORDER BY score DESC,first_seen DESC LIMIT 500"),
@@ -317,7 +376,7 @@ class Store:
                 "questions":rows("SELECT * FROM questions WHERE resolved=0 ORDER BY rowid"),
                 "runs":rows("SELECT * FROM runs ORDER BY started DESC LIMIT 30"),
                 "sources":rows("SELECT * FROM sources ORDER BY checked DESC LIMIT 100"),
-                "documents":rows("SELECT * FROM documents")}
+                "documents":rows("SELECT * FROM documents"),"materials":[dict(r) for r in self.db.execute("SELECT * FROM materials ORDER BY created DESC,id DESC LIMIT 20 OFFSET ?",(material_offset,))],"material_count":self.db.execute("SELECT count(*) FROM materials").fetchone()[0],"material_offset":material_offset}
 
 
 @contextlib.contextmanager

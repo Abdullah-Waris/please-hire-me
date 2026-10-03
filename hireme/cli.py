@@ -17,10 +17,17 @@ def main(argv=None):
     parser=argparse.ArgumentParser(description='Automatic job applications with verified facts')
     parser.add_argument('--data-dir',type=Path,default=DEFAULT_ROOT)
     sub=parser.add_subparsers(dest='command',required=True)
+    p=sub.add_parser('open-dashboard');p.add_argument('--port',type=int,default=8766)
     p=sub.add_parser('dashboard');p.add_argument('--port',type=int,default=8766)
+    p=sub.add_parser('import-material');p.add_argument('path',type=Path);p.add_argument('--kind',choices=['writing_sample','cover_letter','context'],required=True)
     p=sub.add_parser('import-resume');p.add_argument('path',type=Path);p.add_argument('--transcript',action='store_true')
+    p=sub.add_parser('gmail');p.add_argument('action',choices=['import-client','connect','status','disconnect']);p.add_argument('path',type=Path,nargs='?')
+    p=sub.add_parser('backup');p.add_argument('path',type=Path)
+    p=sub.add_parser('restore');p.add_argument('path',type=Path)
+    p=sub.add_parser('pi');p.add_argument('action',choices=['configure','preflight','units','install']);p.add_argument('--directory',type=Path)
+    p=sub.add_parser('reports');p.add_argument('action',choices=['status','flush'])
     sub.add_parser('resume-candidates')
-    p=sub.add_parser('run');p.add_argument('--no-discovery',action='store_true');p.add_argument('--prepare-only',action='store_true');p.add_argument('--limit',type=int)
+    p=sub.add_parser('run');p.add_argument('--no-discovery',action='store_true');p.add_argument('--prepare-only',action='store_true');p.add_argument('--limit',type=int);p.add_argument('--max-attempts',type=int);p.add_argument('--job-id',action='append',default=[])
     sub.add_parser('daemon')
     p=sub.add_parser('discover');p.add_argument('--source',choices=['all','delta','portal','list'],default='all');p.add_argument('--ats');p.add_argument('--limit',type=int)
     p=sub.add_parser('schedule');p.add_argument('action',choices=['install','uninstall','status'],default='status',nargs='?')
@@ -32,7 +39,12 @@ def main(argv=None):
     p=sub.add_parser('login');p.add_argument('url')
     p=sub.add_parser('import-legacy');p.add_argument('path',type=Path,default=REPO,nargs='?')
     args=parser.parse_args(argv)
-    os.umask(0o077);store=Store(args.data_dir.expanduser().absolute())
+    os.umask(0o077)
+    if args.command=='restore':
+        from .backup import restore_backup
+        try:print(json.dumps(restore_backup(args.path,args.data_dir.expanduser().absolute())));return 0
+        except ValueError as e:print(str(e),file=sys.stderr);return 2
+    store=Store(args.data_dir.expanduser().absolute())
     try:
         if args.command=='dashboard':
             from .server import serve
@@ -43,12 +55,43 @@ def main(argv=None):
             print(json.dumps({'imported':r['hash'],'candidate_fields':sorted(r['candidates']),'next':'Confirm facts and finish setup in the dashboard'}))
         elif args.command=='resume-candidates':
             from .onboarding import model_candidates
-            from .provider import ClaudeProvider
-            print(json.dumps(model_candidates(store,ClaudeProvider(store.settings()['model_timeout_seconds']))))
+            from .provider import ManagedProvider
+            print(json.dumps(model_candidates(store,ManagedProvider(store,store.settings()['model_timeout_seconds']))))
+        elif args.command=='backup':
+            from .backup import create_backup
+            print(json.dumps(create_backup(store,args.path)))
+        elif args.command=='open-dashboard':
+            import webbrowser
+            from .server import dashboard_url
+            if not webbrowser.open(dashboard_url(store.root,args.port)):raise ValueError('Open the dashboard from a terminal in the Pi desktop session')
+        elif args.command=='pi':
+            from . import pi
+            if args.action=='configure':result=pi.configure(store)
+            elif args.action=='preflight':result=pi.preflight(store)
+            else:result=pi.install(store,REPO,args.directory,enable=args.action=='install')
+            print(json.dumps(result,indent=2))
+        elif args.command=='reports':
+            from .reports import report_status,flush_reports
+            print(json.dumps(report_status(store) if args.action=='status' else flush_reports(store)))
+        elif args.command=='gmail':
+            from . import gmail
+            if args.action=='import-client':
+                if not args.path:raise ValueError('Provide the Google Desktop OAuth client JSON path')
+                gmail.import_client(store,args.path);print('Google OAuth client stored privately')
+            elif args.action=='connect':print(json.dumps(gmail.connect(store)))
+            elif args.action=='status':print(json.dumps(gmail.status(store)))
+            else:gmail.disconnect(store);print('Local Gmail credentials removed; revoke access in your Google account if desired')
+        elif args.command=='import-material':
+            from .materials import import_material
+            if args.path.is_symlink() or not args.path.is_file():raise ValueError('Choose a regular source file')
+            if args.path.stat().st_size>20*1024*1024:raise ValueError('Source exceeds 20 MiB')
+            print(json.dumps(import_material(store,args.path.read_bytes(),args.path.name,args.kind)))
         elif args.command=='run':
             from .worker import cycle
             if args.limit is not None and not 1<=args.limit<=50:raise ValueError('Limit must be 1–50')
-            print(json.dumps(cycle(store,REPO,not args.no_discovery,not args.prepare_only,args.limit)))
+            if args.max_attempts is not None and not 1<=args.max_attempts<=50:raise ValueError('Attempts must be 1–50')
+            if args.job_id and any(not store.db.execute('SELECT 1 FROM jobs WHERE id=?',(jid,)).fetchone() for jid in args.job_id):raise ValueError('Unknown job ID')
+            print(json.dumps(cycle(store,REPO,not args.no_discovery,not args.prepare_only,args.limit,max_attempts=args.max_attempts,job_ids=set(args.job_id))))
         elif args.command=='daemon':
             from .worker import daemon
             daemon(store,REPO)
@@ -97,8 +140,14 @@ def main(argv=None):
             with worker_lock(store.root,'browser'),sync_playwright() as p:
                 from .util import private_dir
                 channel=store.settings()['browser_channel']
+                browser_options={'channel':'chrome'} if channel=='chrome' else {}
+                if channel=='system-chromium':
+                    import shutil
+                    executable=shutil.which('chromium') or shutil.which('chromium-browser')
+                    if not executable:raise ValueError('Install system Chromium first')
+                    browser_options={'executable_path':executable}
                 ctx=p.chromium.launch_persistent_context(str(private_dir(store.root/'browser')),headless=False,
-                     **({'channel':'chrome'} if channel=='chrome' else {}),accept_downloads=False)
+                     **browser_options,accept_downloads=False)
                 page=ctx.pages[0] if ctx.pages else ctx.new_page();page.goto(url)
                 print('Sign in yourself in the dedicated browser. Press Enter here when finished.')
                 input();ctx.close()

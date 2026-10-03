@@ -20,18 +20,21 @@ class SafeRedirect(urllib.request.HTTPRedirectHandler):
 
 
 class Network:
-    def __init__(self,deadline=None):
+    def __init__(self,deadline=None,checkpoint=None):
+        self.checkpoint=checkpoint
         self.deadline=deadline or time.monotonic()+1800
         self.context=ssl.create_default_context()
         self.opener=urllib.request.build_opener(SafeRedirect(),urllib.request.HTTPSHandler(context=self.context))
 
     def fetch(self,url,data=None,headers=None,opener=None):
+        if self.checkpoint:self.checkpoint()
         canonical_url(url)
         if not public_host(urlsplit(url).hostname): raise Blocked("private_network_denied")
         if time.monotonic()>self.deadline: raise Blocked("discovery_deadline")
         req=urllib.request.Request(url,data=json.dumps(data).encode() if data is not None else None,
              headers={"User-Agent":"please-hire-me/0.3 (+job discovery)",**({"Content-Type":"application/json"} if data is not None else {}),**(headers or {})})
         for attempt in range(2):
+            if self.checkpoint:self.checkpoint()
             try:
                 with (opener or self.opener).open(req,timeout=min(25,max(1,self.deadline-time.monotonic()))) as response:
                     content=response.read(MAX_BYTES+1)

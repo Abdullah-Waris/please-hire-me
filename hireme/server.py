@@ -2,19 +2,32 @@ from __future__ import annotations
 
 import json
 import secrets
+import re
 import threading
 from http.server import BaseHTTPRequestHandler,ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import parse_qs,urlsplit
+from urllib.parse import parse_qs,urlsplit,unquote
 
 from .config import FACTS,REQUIRED
 from .store import Store
+from .util import private_dir,atomic_json
 
 MAX_BODY=21*1024*1024
 
 
+def dashboard_url(root,port=8766):
+    path=private_dir(root/'config')/'dashboard-token.json'
+    if path.is_symlink():raise ValueError('Unsafe dashboard token')
+    if path.exists():
+        token=json.loads(path.read_text()).get('token','')
+        if not re.fullmatch(r'[A-Za-z0-9_-]{40,100}',token):raise ValueError('Invalid dashboard token file')
+    else:
+        token=secrets.token_urlsafe(32);atomic_json(path,{'token':token})
+    return f'http://127.0.0.1:{port}/#token={token}'
+
+
 def serve(root,repo,port=8766,token=None):
-    token=token or secrets.token_urlsafe(32); state={'running':False,'lock':threading.Lock()}
+    token=token or dashboard_url(root,port).split('#token=',1)[1]; state={'running':False,'lock':threading.Lock()}
     assets=Path(__file__).parent/'static'
     def start_cycle():
         with state['lock']:
@@ -54,7 +67,15 @@ def serve(root,repo,port=8766,token=None):
             if not self._auth():return self.send(403,{'error':'Open the dashboard URL printed by hireme dashboard'})
             store=Store(root)
             try:
-                if path=='/api/state':return self.send(200,{**store.snapshot(),'fact_labels':FACTS,'required':sorted(REQUIRED),'worker_running':state['running']})
+                if path=='/api/state':
+                    try:offset=int(parse_qs(urlsplit(self.path).query).get('material_offset',['0'])[0]);snapshot=store.snapshot(offset)
+                    except ValueError:return self.send(400,{'error':'Invalid material page'})
+                    from .gmail import status as gmail_status
+                    from .reports import report_status
+                    snapshot['gmail']=gmail_status(store);snapshot['reports']=report_status(store)
+                    from .setup_status import readiness
+                    snapshot['readiness']=readiness(store)
+                    return self.send(200,{**snapshot,'fact_labels':FACTS,'required':sorted(REQUIRED),'worker_running':state['running'] or any(r['status']=='running' for r in snapshot['runs'])})
                 if path.startswith('/api/screenshot/'):
                     name=path.rsplit('/',1)[-1]
                     if '/' in name or '..' in name:return self.send(400,{'error':'Invalid screenshot'})
@@ -77,22 +98,66 @@ def serve(root,repo,port=8766,token=None):
                         with tempfile.NamedTemporaryFile(suffix='.pdf',dir=root) as f:
                             f.write(raw);f.flush();result=import_resume(store,Path(f.name),'transcript' if path=='/api/transcript' else 'resume')
                         return self.send(200,{'hash':result['hash'],'candidates':result['candidates']})
+                    if path=='/api/gmail-client':
+                        import tempfile
+                        from .gmail import import_client
+                        with tempfile.NamedTemporaryFile(dir=root,suffix='.json') as f:
+                            f.write(raw);f.flush();import_client(store,Path(f.name))
+                        return self.send(200,{'saved':True})
+                    if path=='/api/material-upload':
+                        from .materials import import_material
+                        result=import_material(store,raw,unquote(self.headers.get('X-Upload-Name','')),self.headers.get('X-Material-Kind',''))
+                        return self.send(200,result)
                     data=json.loads(raw)
-                    if path=='/api/facts':store.put_facts(data['facts']);result={'saved':True}
+                    if path=='/api/provider-key':
+                        from .connections import save_key
+                        save_key(store,data['provider'],data['key']);result={'saved':True}
+                    elif path=='/api/provider-check':
+                        from .setup_status import readiness
+                        result=readiness(store,verify=True)
+                    elif path=='/api/remove-provider-key':
+                        from .connections import key_path
+                        key_path(store).unlink(missing_ok=True);result={'removed':True}
+                    elif path=='/api/context-text':
+                        from .materials import import_material,review_material
+                        text=data['text'];role=data['role']
+                        if role not in ('personal','style','reference') or not isinstance(text,str) or not 20<=len(text)<=12000:raise ValueError('Provide 20–12,000 characters and an approved use')
+                        material=import_material(store,text.encode(),'Typed context.txt','writing_sample' if role=='style' else 'context')
+                        review_material(store,material['id'],text,role,True);result={'saved':True}
+                    elif path=='/api/facts':store.put_facts(data['facts']);result={'saved':True}
                     elif path=='/api/answer':store.answer_question(data['id'],data['value'],data.get('fact_key'));result={'saved':True}
+                    elif path=='/api/material-review':
+                        from .materials import review_material
+                        review_material(store,data['id'],data['text'],data['role'],data['confirmed']);result={'saved':True}
+                    elif path=='/api/reports/flush':
+                        from .reports import flush_reports
+                        result=flush_reports(store)
                     elif path=='/api/template':result={'id':store.put_template(data['category'],data['body'])}
+                    elif path=='/api/pause':store.update_settings({'live_enabled':False});result={'paused':True}
+                    elif path=='/api/resume-worker':store.update_settings({'live_enabled':True});result={'enabled':True}
                     elif path=='/api/settings':result=store.update_settings(data)
                     elif path=='/api/complete-setup':
                         if store.missing_setup():raise ValueError('Missing: '+', '.join(store.missing_setup()))
-                        store.update_settings({'onboarding_complete':True,'live_enabled':True})
-                        from .scheduler import install
-                        try:
-                            installed=install(store,repo)
-                            start_cycle()
-                            result={'message':'Automatic applications enabled; six-hour schedule installed: '+installed+'. First cycle started.'}
-                        except Exception as e:
-                            store.update_settings({'live_enabled':False})
-                            result={'message':'Facts saved, but scheduling failed. Submissions paused. Run hireme daemon or fix the scheduler: '+str(e)}
+                        from .setup_status import readiness
+                        checks=readiness(store,verify=True)
+                        if not checks['supported_platform']:raise ValueError('Use macOS or Linux; on Windows use WSL2')
+                        if not checks['browser_ready'] or not checks['provider']['ready']:raise ValueError('Complete browser and provider setup first')
+                        if data.get('start') is not True:
+                            store.update_settings({'onboarding_complete':True,'live_enabled':False})
+                            result={'message':'Setup saved. Applications remain paused. Resume when ready.'}
+                        else:
+                            store.update_settings({'onboarding_complete':True,'live_enabled':True})
+                            from .scheduler import install
+                            try:
+                                if store.settings()['deployment']=='pi':
+                                    from .pi import install as install_pi
+                                    installed=install_pi(store,repo,enable=True)['directory']
+                                else:installed=install(store,repo)
+                                start_cycle()
+                                result={'message':'Automatic applications enabled; schedule installed: '+installed+'. First cycle started.'}
+                            except Exception as e:
+                                store.update_settings({'live_enabled':False})
+                                result={'message':'Setup saved; scheduling failed. Submissions paused. Run hireme daemon or fix the scheduler: '+type(e).__name__}
                     elif path=='/api/reconcile':
                         if type(data.get('submitted')) is not bool:raise ValueError('Choose submitted or not submitted')
                         store.reconcile(data['id'],data['submitted'],data['note']);result={'saved':True}

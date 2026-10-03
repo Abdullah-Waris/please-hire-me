@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 import plistlib
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -26,7 +27,7 @@ def install(store,repo):
           'WorkingDirectory':str(repo),'StartInterval':hours*3600,'RunAtLoad':False,
           'StandardOutPath':str(logs/'worker.out.log'),'StandardErrorPath':str(logs/'worker.err.log'),
           'EnvironmentVariables':{'PATH':os.environ.get('PATH','/usr/local/bin:/usr/bin:/bin'),
-              **{k:os.environ[k] for k in ('ANTHROPIC_API_KEY','CLAUDE_CODE_OAUTH_TOKEN','CLAUDE_CONFIG_DIR','XDG_CONFIG_HOME') if os.environ.get(k)}}}
+              **{k:os.environ[k] for k in ('CLAUDE_CONFIG_DIR','CODEX_HOME','XDG_CONFIG_HOME') if os.environ.get(k)}}}
         # Connection secrets stay in a private file, never argv or logs.
         with tempfile.NamedTemporaryFile(dir=directory,prefix='.'+LABEL,delete=False) as f:
             temporary=Path(f.name)
@@ -38,6 +39,9 @@ def install(store,repo):
         r=subprocess.run(['launchctl','bootstrap',f'gui/{os.getuid()}',str(path)],capture_output=True)
         if r.returncode:raise ValueError('launchd rejected worker; run hireme daemon in a terminal')
         return str(path)
+    if sys.platform=='linux' and shutil.which('systemctl') and (Path.home()/'.config/systemd/user/please-hire-me-worker.timer').exists():
+        from .pi import install as install_pi
+        return install_pi(store,repo,enable=True)['directory']
     if 24%hours:raise ValueError('Cron requires a schedule dividing 24 hours')
     r=subprocess.run(['crontab','-l'],capture_output=True,text=True)
     lines=[l for l in r.stdout.splitlines() if not l.endswith('# '+LABEL)]
@@ -48,7 +52,7 @@ def install(store,repo):
     return 'cron'
 
 
-def uninstall():
+def uninstall(cron_only=False):
     if sys.platform=='darwin':
         subprocess.run(['launchctl','bootout',f'gui/{os.getuid()}/{LABEL}'],capture_output=True)
         path=Path.home()/'Library/LaunchAgents'/(LABEL+'.plist')
@@ -56,6 +60,9 @@ def uninstall():
             payload=plistlib.loads(path.read_bytes())
             if payload.get('Label')==LABEL:path.unlink()
     else:
+        if not cron_only and sys.platform=='linux' and shutil.which('systemctl') and (Path.home()/'.config/systemd/user/please-hire-me-worker.timer').exists():
+            subprocess.run(['systemctl','--user','disable','--now','please-hire-me-worker.timer'],capture_output=True,check=True)
+        if not shutil.which('crontab'):return
         r=subprocess.run(['crontab','-l'],capture_output=True,text=True)
         lines=[l for l in r.stdout.splitlines() if not l.endswith('# '+LABEL)]
         subprocess.run(['crontab','-'],input='\n'.join(lines)+'\n',text=True,check=True)
@@ -65,5 +72,9 @@ def status():
     if sys.platform=='darwin':
         p=Path.home()/'Library/LaunchAgents'/(LABEL+'.plist')
         return {'installed':p.is_file(),'path':str(p)}
+    if sys.platform=='linux' and shutil.which('systemctl'):
+        r=subprocess.run(['systemctl','--user','is-enabled','please-hire-me-worker.timer'],capture_output=True,text=True)
+        if not r.returncode:return {'installed':True,'kind':'systemd','timer':'please-hire-me-worker.timer'}
+    if not shutil.which('crontab'):return {'installed':False}
     r=subprocess.run(['crontab','-l'],capture_output=True,text=True)
     return {'installed':any(l.endswith('# '+LABEL) for l in r.stdout.splitlines())}

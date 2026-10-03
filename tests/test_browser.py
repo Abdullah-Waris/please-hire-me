@@ -7,8 +7,12 @@ from hireme.browser import Browser
 from hireme.util import Blocked,digest
 
 @pytest.fixture
-def ats():
+def ats(request):
     records=[];html=(Path(__file__).parent/'fixtures/application.html').read_bytes()
+    if getattr(request,'param',False) is True:
+        html=html.replace(b'<button type="submit">',b'<label for="cover_letter">Cover Letter*</label><input id="cover_letter" name="cover_letter" type="file" required><button type="submit">')
+    if getattr(request,'param',None)=='otp':
+        html=html.replace(b'e.preventDefault();let f=',b'e.preventDefault();if(!document.getElementById("security_code")){let p=document.createElement("p");p.textContent="A verification code was sent to test@candidate.invalid. To submit your application, enter the 8-character code.";let l=document.createElement("label");l.htmlFor="security_code";l.textContent="Security code";let c=document.createElement("input");c.id="security_code";c.required=true;e.target.append(p,l,c);return;}let f=')
     class H(BaseHTTPRequestHandler):
         def log_message(self,*a):pass
         def do_GET(self):
@@ -159,7 +163,7 @@ def test_realistic_profile_wording_and_writing_sample_reuse_submit_without_quest
     class Model:
         def __init__(self,*args):pass
         def match_field(self,field,*args):return {'fact_key':None,'template_id':tid}
-    monkeypatch.setattr('hireme.provider.ClaudeProvider',Model)
+    monkeypatch.setattr('hireme.provider.ManagedProvider',Model)
     job={**local_job(store,ats),'source':'gh:synthetic'}
     original=(Path(__file__).parent/'fixtures/application.html').read_text()
     additions='''<label>Which college or university do you currently attend?*<select name="school" required><option value="">Select…</option><option>Harvard University</option><option>Other</option></select></label>
@@ -293,3 +297,108 @@ def test_header_apply_button_does_not_compete_with_form_submit(store,ats):
         b.page.route(ats[0]+'/**',form)
         assert b.apply(job)=='confirmed'
     assert len(ats[1])==1
+
+
+def test_dynamic_dropdown_options_do_not_change_form_contract():
+    original={'label':'School','type':'combobox','required':False,'options':['A College'],'multiple':False,'maxlength':-1}
+    searched={**original,'options':['University of California, Berkeley']}
+    assert Browser._shape([original])==Browser._shape([searched])
+    assert Browser._shape([original])!=Browser._shape([{**searched,'required':True}])
+    assert Browser._shape([{**original,'type':'select'}])!=Browser._shape([{**searched,'type':'select'}])
+
+
+def test_custom_multiselect_reads_selected_chip(store,ats):
+    with Browser(store,test_url=ats[0]) as b:
+        b.page.goto(ats[0])
+        b.page.set_content('<label for="season">Internship season</label><div><div class="select__multi-value__label">Summer 2027</div><input id="season" role="combobox"></div>')
+        assert b._snapshot()[0]['value']=='Summer 2027'
+
+
+def test_geocoding_endpoint_is_read_only(store,monkeypatch):
+    monkeypatch.setattr('hireme.browser.public_host',lambda host:True)
+    b=Browser(store);b.current_host='job-boards.greenhouse.io'
+    class Request:
+        url='https://api-geocode-earth-proxy.greenhouse.io/v1/autocomplete?text=Berkeley'
+        method='GET'
+    class Route:
+        request=Request();action=None
+        def abort(self):self.action='abort'
+        def continue_(self):self.action='continue'
+    route=Route();b._route(route);assert route.action=='continue'
+    route.request.method='POST';b._route(route);assert route.action=='abort'
+
+
+def test_upload_label_normalization_preserves_required_marker(store,ats):
+    with Browser(store,test_url=ats[0]) as b:
+        b.page.goto(ats[0])
+        b.page.set_content('<label for="cover_letter">Cover Letter*</label><input id="cover_letter" type="file">')
+        field=b._snapshot()[0]
+        assert field['label']=='Cover letter' and field['required'] is True
+
+
+def test_upload_wrapper_required_marker_is_not_hidden_attach_label(store,ats):
+    with Browser(store,test_url=ats[0]) as b:
+        b.page.goto(ats[0])
+        b.page.set_content('<div class="file-upload"><div>Cover Letter*</div><div><label for="cover_letter">Attach</label><input id="cover_letter" type="file"></div></div>')
+        assert b._snapshot()[0]['required'] is True
+
+
+@pytest.mark.parametrize('ats',[True],indirect=True)
+def test_required_cover_letter_is_generated_uploaded_and_confirmed(store,ats,monkeypatch):
+    store.update_settings({'tailored_writing':True,'cover_letters':True})
+    store.put_template('experience','I built Python services and tested their production behavior.')
+    class Model:
+        def __init__(self,*args,**kwargs):pass
+        def draft_answer(self,label,choices,context,maxlength):
+            return {'answer':'I built Python services and tested their behavior.\n\nI enjoy working on reliable tools.\n\nI would like to apply that experience in this role.','sentence_ids':[choices[0]['id']]}
+    monkeypatch.setattr('hireme.provider.ManagedProvider',Model)
+    with Browser(store,test_url=ats[0]) as b:assert b.apply(local_job(store,ats))=='confirmed'
+    assert len(ats[1])==1
+    app=store.db.execute('SELECT * FROM applications').fetchone()
+    docs=json.loads(app['package'])['documents']
+    letter=next(d for d in docs if d['kind']=='cover_letter')
+    assert letter['generated'] and letter['hash'].encode() in ats[1][0]
+
+
+@pytest.mark.parametrize('ats',['otp'],indirect=True)
+def test_gmail_code_continues_the_same_application_without_model_access(store,ats,monkeypatch):
+    store.update_settings({'gmail_verification':True})
+    class Mailbox:
+        def __init__(self,s):self.store=s
+        def find_code(self,company,since,aid,length):
+            assert company=='Synthetic ATS' and length==8
+            return 'ABC12345'
+    monkeypatch.setattr('hireme.gmail.GmailClient',Mailbox)
+    with Browser(store,test_url=ats[0]) as b:assert b.apply(local_job(store,ats))=='confirmed'
+    assert len(ats[1])==1
+    app=store.db.execute('SELECT * FROM applications').fetchone()
+    assert app['state']=='confirmed'
+    assert store.db.execute('SELECT attempts,state FROM verification_challenges').fetchone()[0]==1
+    assert 'ABC12345' not in app['package'] and 'ABC12345' not in app['confirmation']
+    assert 'ABC12345' not in str([tuple(r) for r in store.db.execute('SELECT * FROM events')])
+
+
+@pytest.mark.parametrize('ats',['otp'],indirect=True)
+def test_without_gmail_connection_verification_is_held_and_not_retried(store,ats):
+    store.update_settings({'gmail_verification':True})
+    with Browser(store,test_url=ats[0]) as b:
+        assert b.apply(local_job(store,ats))=='awaiting_verification'
+        with pytest.raises(Blocked):b.apply(local_job(store,ats))
+    assert not ats[1]
+    assert store.db.execute('SELECT state FROM applications').fetchone()[0]=='awaiting_verification'
+
+
+@pytest.mark.parametrize('reason',['model_budget_exhausted','provider_rate_limited'])
+def test_model_budget_and_rate_limit_stop_before_employer_write(store,ats,monkeypatch,reason):
+    class Model:
+        def __init__(self,*args):pass
+        def match_field(self,*args,**kwargs):raise Blocked(reason)
+    monkeypatch.setattr('hireme.provider.ManagedProvider',Model)
+    with Browser(store,test_url=ats[0]) as browser:
+        original=browser._snapshot
+        def injected():
+            fields=original();fields.append({'index':99,'indices':[99],'label':'Unknown personal fact','type':'text','required':True,'options':[],'maxlength':-1,'value':''});return fields
+        browser._snapshot=injected
+        with pytest.raises(Blocked,match=reason):browser.apply(local_job(store,ats))
+    assert not ats[1]
+    assert not store.db.execute('SELECT 1 FROM questions').fetchone()

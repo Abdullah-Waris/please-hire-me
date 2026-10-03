@@ -40,3 +40,13 @@ def test_greenhouse_custom_link_uses_official_requisition():
                             'title':'Software Engineer Intern','location':{'name':'US'}}]}
     result=probe(Net(),'gh','stripe')
     assert result[0]['url']=='https://job-boards.greenhouse.io/stripe/jobs/123'
+
+
+def test_paused_network_does_not_open_any_request(monkeypatch):
+    import pytest
+    from hireme.net import Network
+    from hireme.util import Blocked
+    def paused():raise Blocked('paused')
+    n=Network(checkpoint=paused)
+    monkeypatch.setattr(n.opener,'open',lambda *args,**kwargs:pytest.fail('Paused discovery must not send a request'))
+    with pytest.raises(Blocked,match='paused'):n.fetch('https://jobs.lever.co/acme')

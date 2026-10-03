@@ -5,6 +5,20 @@ from zoneinfo import ZoneInfo
 
 DEFAULTS = {
     "schema_version": 1,
+    "provider": "claude-cli",
+    "provider_model": "",
+    "deployment": "local",
+    "max_attempts_per_cycle": 10,
+    "max_model_requests_per_cycle": 40,
+    "max_model_requests_per_day": 100,
+    "max_output_tokens": 2000,
+    "tailored_writing": False,
+    "contextual_preferences": False,
+    "gmail_reports": False,
+    "gmail_verification": False,
+    "gmail_code_wait_seconds": 60,
+    "cover_letters": False,
+    "cover_letter_words": 250,
     "timezone": "America/Los_Angeles",
     "schedule_hours": 6,
     "target_per_cycle": 7,
@@ -15,7 +29,7 @@ DEFAULTS = {
     "company_cooldown_days": 90,
     "live_enabled": False,
     "onboarding_complete": False,
-    "browser_channel": "chrome",
+    "browser_channel": "chromium",
     "headless": False,
     "discovery_workers": 6,
     "summer_2027_locations": ["United States", "Remote (US)"],
@@ -40,20 +54,31 @@ DEFAULTS = {
 def validate_settings(changes: dict, current: dict | None = None) -> dict:
     if not isinstance(changes, dict) or set(changes) - set(DEFAULTS):
         raise ValueError("Unknown settings keys")
-    s = copy.deepcopy(current or DEFAULTS)
+    s = copy.deepcopy(DEFAULTS)
+    s.update(copy.deepcopy(current or {}))
     s.update(changes)
+    if s['provider'] not in ('claude-cli','codex-cli','anthropic-api','openai-api'):raise ValueError('Unsupported provider')
+    if s['deployment'] not in ('local','pi'):raise ValueError('Choose local or pi')
+    import re
+    if not isinstance(s['provider_model'],str) or (s['provider_model'] and not re.fullmatch(r'[A-Za-z0-9._:/-]{1,100}',s['provider_model'])):raise ValueError('Invalid model identifier')
+    for key,ceiling in [('max_attempts_per_cycle',50),('max_model_requests_per_cycle',200),('max_model_requests_per_day',500),('max_output_tokens',8000)]:
+        if type(s[key]) is not int or not 1<=s[key]<=ceiling:raise ValueError('Invalid '+key)
+    if s['max_model_requests_per_cycle']>s['max_model_requests_per_day']:raise ValueError('Cycle model limit exceeds daily limit')
     for key in ("schedule_hours", "target_per_cycle", "max_per_cycle", "target_per_day", "max_per_day",
                 "max_per_company", "company_cooldown_days", "discovery_workers", "model_timeout_seconds",
-                "cycle_timeout_seconds"):
+                "cycle_timeout_seconds", "cover_letter_words", "gmail_code_wait_seconds"):
         if type(s[key]) is not int or not 1 <= s[key] <= 86400:
             raise ValueError(f"Invalid {key}")
     if s["discovery_workers"] > 16 or s["max_per_cycle"] > 50 or s["max_per_day"] > 100:
         raise ValueError("Worker or submission limit too high")
     if s["target_per_cycle"] > s["max_per_cycle"] or s["target_per_day"] > s["max_per_day"]:
         raise ValueError("Targets exceed ceilings")
-    for key in ("live_enabled", "onboarding_complete", "headless"):
+    for key in ("live_enabled", "onboarding_complete", "headless", "tailored_writing", "contextual_preferences", "cover_letters", "gmail_reports", "gmail_verification"):
         if type(s[key]) is not bool:
             raise ValueError(f"Invalid {key}")
+    if s["gmail_code_wait_seconds"]>120:raise ValueError("Gmail verification wait must be at most 120 seconds")
+    if not 100<=s["cover_letter_words"]<=350:raise ValueError("Cover letters must use 100–350 words")
+    if s["cover_letters"] and not s["tailored_writing"]:raise ValueError("Cover letters require tailored writing")
     for key in ("min_annual_usd", "min_hourly_usd", "max_years_required", "min_fit_score"):
         import math
         if type(s[key]) not in (int, float) or not math.isfinite(s[key]) or s[key] < 0:
@@ -67,7 +92,7 @@ def validate_settings(changes: dict, current: dict | None = None) -> dict:
         raise ValueError("Targets cannot be empty")
     if not isinstance(s["company_aliases"], dict) or any(not isinstance(k, str) or not isinstance(v, str) for k,v in s["company_aliases"].items()):
         raise ValueError("Invalid aliases")
-    if s["browser_channel"] not in ("chrome", "chromium"):
+    if s["browser_channel"] not in ("chrome", "chromium", "system-chromium"):
         raise ValueError("Unsupported browser channel")
     ZoneInfo(s["timezone"])
     return s
@@ -80,7 +105,7 @@ FACTS = {
     "location": "Current city / state", "street": "Street address", "city": "City",
     "state": "State", "postal_code": "Postal code", "country": "Country of residence",
     "linkedin": "LinkedIn URL", "github": "GitHub URL", "website": "Website",
-    "school": "University", "degree": "Degree in progress", "major": "Major",
+    "high_school": "High school attended", "school": "University", "degree": "Degree in progress", "major": "Major",
     "graduation": "Expected graduation (YYYY-MM)", "college_start": "College start (YYYY-MM)",
     "highest_completed_degree": "Highest completed degree", "gpa": "GPA",
     "work_authorized_us": "Currently authorized to work in the US (Yes / No)",

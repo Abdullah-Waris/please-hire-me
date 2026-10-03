@@ -183,3 +183,66 @@ def test_cached_writing_is_reassembled_for_a_shorter_field(store,job):
     shorter=resolve(store,job['host'],f,Model(),context=job)
     assert len(shorter['value'])<len(first['value']) and shorter['value']=='I built a service.'
     assert resolve(store,job['host'],f,context=job)==shorter
+
+
+def test_high_school_is_distinct_from_university(store,job):
+    store.put_facts({'high_school':'Dougherty Valley High School','school':'UC Berkeley'})
+    assert resolve(store,job['host'],field('What high school did you attend?'))['value']=='Dougherty Valley High School'
+    assert resolve(store,job['host'],field('Which university do you attend?'))['value']=='UC Berkeley'
+    with pytest.raises(Blocked):resolve(store,job['host'],field('High school GPA','number'))
+
+
+def test_applied_role_comes_from_posting(store,job):
+    f=field('What internship position are you applying for?')
+    assert resolve(store,job['host'],f,context=job)['value']==job['title']
+    assert resolve(store,job['host'],field(f['label'],'select',['Software Engineering Intern','Accounting Intern']),context=job)['value']=='Software Engineering Intern'
+    with pytest.raises(Blocked):resolve(store,job['host'],field(f['label'],'select',['Accounting Intern']),context=job)
+
+
+def test_tailored_writing_is_cached_and_invalidated_by_source_and_posting(store,job,package):
+    store.update_settings({'tailored_writing':True})
+    tid=store.put_template('experience','I built Python services around production workflows.')
+    class Model:
+        def draft_answer(self,label,choices,context,maxlength):
+            return {'answer':'I want to build Python systems that people rely on every day.','sentence_ids':[choices[0]['id']]}
+    f=field('Why do you want to work here?','textarea')
+    a=resolve(store,job['host'],f,Model(),context=job)
+    package['answers']=[a];package['steps']=[]
+    validate_package(store,job,package)
+    with pytest.raises(Blocked):validate_package(store,{**job,'description':'Different posting'},package)
+    a['value']+=' Invented claim.'
+    with pytest.raises(Blocked):validate_package(store,job,package)
+    store.put_template('experience','I built TypeScript services around production workflows.',tid)
+    with pytest.raises(Blocked):resolve(store,job['host'],f,context=job)
+
+
+def test_context_choices_use_confirmed_skills_season_and_locality(store,job):
+    store.update_settings({'contextual_preferences':True})
+    store.put_facts({'skills':'React, TypeScript, Python, SQL, FastAPI, Docker, AWS, GCP','earliest_start':'2027-05','summer_2027_relocate':'Yes','onsite':'Yes'})
+    options=['Fall 2026','Winter 2026','Spring 2027','Summer 2027']
+    assert resolve(store,job['host'],field('Which internship position are you available for?','select',options),context=job)['value']=='Summer 2027'
+    areas=['Product Engineering','Backend/Infrastructure','Security Engineering','Open to any area']
+    first=resolve(store,job['host'],field('Which type of engineering work are you most excited to do? Select your first choice.','select',areas),context=job)
+    second=resolve(store,job['host'],field('Which type of engineering work are you most excited to do? Select your second choice.','select',areas),context=job)
+    assert first['value']=='Backend/Infrastructure' and second['value']=='Product Engineering'
+    assert resolve(store,job['host'],field('Please select the location where you can work','select',['Reno, NV','San Francisco, CA']),context=job)['value']=='San Francisco, CA'
+    with pytest.raises(Blocked):resolve(store,job['host'],field('Are you legally authorized to work in France?','select',['Yes','No']),context=job)
+
+
+def test_context_choices_are_opt_in_and_do_not_guess_season(store,job):
+    store.put_facts({'earliest_start':'2027-05','summer_2027_relocate':'Yes'})
+    f=field('Which internship position are you available for?','select',['Summer 2027','Fall 2026'])
+    with pytest.raises(Blocked):resolve(store,job['host'],f,context=job)
+    store.update_settings({'contextual_preferences':True})
+    store.put_facts({'earliest_start':'2028-05'})
+    with pytest.raises(Blocked):resolve(store,job['host'],f,context=job)
+
+
+def test_city_autocomplete_alias_preserves_location(store):
+    from hireme.answers import resolve
+    from hireme.util import Blocked
+    import pytest
+    store.put_facts({'location':'Berkeley, CA'})
+    field={'label':'Location (City)*','type':'combobox','required':True,'options':['Berkeley, California, United States'],'maxlength':-1}
+    assert resolve(store,'job-boards.greenhouse.io',field)['value']=='Berkeley, California, United States'
+    with pytest.raises(Blocked):resolve(store,'job-boards.greenhouse.io',{**field,'options':['Berkeley, England, United Kingdom']})
