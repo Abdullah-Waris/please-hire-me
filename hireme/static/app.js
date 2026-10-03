@@ -2677,6 +2677,14 @@ function renderMaterials() {
         "subtle",
       ),
     );
+    if (source.original_available === false)
+      box.append(
+        el(
+          "p",
+          "The original file is missing, unreadable or has permissions that need repair. Re-upload the matching original with the same document purpose to repair it. Your reviewed excerpt is still saved.",
+          "source-file-warning",
+        ),
+      );
     const form = el("form", undefined, "material-review");
     const textLabel = el("label", "Reviewed excerpt");
     const text = el("textarea");

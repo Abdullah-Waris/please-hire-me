@@ -1728,3 +1728,12 @@ pre {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.source-file-warning {
+  padding: 12px 14px;
+  border: 1px solid #d7bf91;
+  border-radius: 10px;
+  background: #fff8e9;
+  color: #684619;
+  font-size: 14px;
+}

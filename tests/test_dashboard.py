@@ -896,11 +896,14 @@ def test_material_upload_review_and_context_preferences(tmp_path):
             store=Store(root)
             assert store.db.execute('SELECT revision FROM materials').fetchone()[0]==revision
             source=dict(store.db.execute('SELECT * FROM materials').fetchone())
-            stored=store.root/'materials'/source['filename']; stored.write_bytes(b'Synthetic damaged original')
+            stored=store.root/'materials'/source['filename']; stored.unlink()
             store.close()
+            page.evaluate('refresh()')
+            expect(page.locator('.source-file-warning')).to_contain_text('original file is missing')
             page.locator('#material-upload-form input[type=file]').set_input_files({'name':'research-notes.txt','mimeType':'text/plain','buffer':b'I built Python services for an operational workflow and tested their behavior.'})
             page.locator('#material-upload-form button').click()
             expect(page.locator('#notice')).to_contain_text('Original source file restored')
+            expect(page.locator('.source-file-warning')).to_have_count(0)
             store=Store(root)
             assert dict(store.db.execute('SELECT * FROM materials').fetchone())==source
             assert stored.read_bytes()==b'I built Python services for an operational workflow and tested their behavior.'

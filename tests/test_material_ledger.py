@@ -36,3 +36,38 @@ def test_source_approval_filters_do_not_treat_unapproved_roles_as_approved(store
 @pytest.mark.parametrize('kwargs',[{'search':None},{'search':'x'*201},{'status':'unknown'},{'offset':True},{'offset':-1},{'offset':1000001},{'limit':0},{'limit':101}])
 def test_source_search_rejects_invalid_bounds(store,kwargs):
     with pytest.raises(ValueError): search_materials(store,**kwargs)
+
+
+@pytest.mark.parametrize('issue',['missing','empty','permissions','link','directory','oversize'])
+def test_source_original_readability_reports_unavailable_without_writes(store,tmp_path,issue):
+    source=import_material(store,b'Synthetic original source content for review.','original.txt','context')
+    path=store.root/'materials'/source['filename']
+    assert search_materials(store)['materials'][0]['original_available']
+    if issue=='missing': path.unlink()
+    elif issue=='empty': path.write_bytes(b'')
+    elif issue=='permissions': path.chmod(0o644)
+    elif issue=='link':
+        outside=tmp_path/'outside.txt'; outside.write_bytes(b'Outside synthetic content')
+        path.unlink(); path.symlink_to(outside)
+    elif issue=='directory': path.unlink(); path.mkdir()
+    else:
+        with path.open('wb') as target: target.truncate(21*1024*1024)
+    changes=store.db.total_changes
+    assert not search_materials(store)['materials'][0]['original_available']
+    assert store.db.total_changes==changes
+    assert store.db.execute('SELECT text FROM materials WHERE id=?',(source['id'],)).fetchone()[0]==source['text']
+
+
+def test_source_original_readability_is_not_an_integrity_certificate(store):
+    source=import_material(store,b'Synthetic original source content for review.','original.txt','context')
+    path=store.root/'materials'/source['filename']; path.write_bytes(b'Changed but readable synthetic bytes')
+    assert search_materials(store)['materials'][0]['original_available']
+    from hireme.backup import create_backup
+    with pytest.raises(ValueError,match='missing or changed'): create_backup(store,store.root.parent/'tampered.zip')
+
+
+def test_read_only_private_original_is_available_without_changing_permissions(store):
+    source=import_material(store,b'Synthetic original source content for review.','original.txt','context')
+    path=store.root/'materials'/source['filename']; path.chmod(0o400)
+    assert search_materials(store)['materials'][0]['original_available']
+    assert path.stat().st_mode & 0o777==0o400
