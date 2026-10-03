@@ -285,6 +285,14 @@ class Browser:
         return bool(re.search(r'verification code was sent.{0,300}to submit your application',text,re.I|re.S)
                     and self.page.get_by_label('Security code',exact=True).count())
 
+    def _outcome_screenshot(self,path,**kwargs):
+        try:
+            self.page.screenshot(path=str(path),type='jpeg',full_page=True,timeout=5000,**kwargs)
+            return path.name
+        except Exception as e:
+            self.store.event('screenshot_failed',self.aid,{'type':type(e).__name__})
+            return ''
+
     def _continue_email_verification(self,job,submit):
         if not self.store.settings()['gmail_verification']:
             self.store.event('verification_held',self.aid,{'reason':'gmail_verification_disabled'})
@@ -325,11 +333,11 @@ class Browser:
         screenshot=self.store.root/'screenshots'/(self.aid+'-verified.jpg')
         # A rejected code may remain visible. Do not persist it in screenshots/text.
         screenshot_kwargs={'mask':[control]} if control.count() else {}
-        self.page.screenshot(path=str(screenshot),type='jpeg',full_page=True,**screenshot_kwargs)
+        screenshot_name=self._outcome_screenshot(screenshot,**screenshot_kwargs)
         text=text.replace(code,'[verification code redacted]')
         confirmed=CONFIRMED.search(text) and not self.page.locator('input[type=email]').count()
         outcome='confirmed' if confirmed else 'awaiting_verification' if self._email_verification(text) else 'unknown'
-        self.store.finish(self.aid,outcome,text,screenshot.name)
+        self.store.finish(self.aid,outcome,text,screenshot_name)
         return outcome
 
     def _snapshot(self):
@@ -581,21 +589,25 @@ class Browser:
             self.store.checkpoint()
             self.store.begin_submit(self.aid); self.attempted=True
             requested=time.time()
+            stage='submit_click'
             try:
                 submit.click(timeout=15000)
+                stage='outcome_wait'
                 text=self._wait_submission_outcome(job)
+                stage='outcome_evidence'
                 screenshot=self.store.root/'screenshots'/(self.aid+'-after.jpg')
-                self.page.screenshot(path=str(screenshot),type='jpeg',full_page=True)
+                screenshot_name=self._outcome_screenshot(screenshot)
                 confirmed=CONFIRMED.search(text) and not self.page.locator('input[type=email]').count()
                 outcome='not_submitted' if REJECTED.search(text) else 'confirmed' if confirmed else 'awaiting_verification' if self._email_verification(text) else 'unknown'
                 evidence=text if outcome=='awaiting_verification' else text[:4000]
                 if outcome=='awaiting_verification':
                     self.store.db.execute('INSERT OR REPLACE INTO verification_challenges VALUES(?,?,?,?,?,?,?,0)',
                         (self.aid,'greenhouse',self.page.url,job['company'],requested,8,'pending'))
-                self.store.finish(self.aid,outcome,evidence,screenshot.name)
+                self.store.finish(self.aid,outcome,evidence,screenshot_name)
                 if outcome=='awaiting_verification':return self._continue_email_verification(job,submit)
                 return outcome
             except Exception as e:
+                self.store.event('submission_error',self.aid,{'stage':stage,'type':type(e).__name__})
                 outcome=self.store.db.execute('SELECT state FROM applications WHERE id=?',(self.aid,)).fetchone()
                 if outcome and outcome[0]=='submitting':self.store.finish(self.aid,'unknown',f'{type(e).__name__}: outcome requires verification')
                 if isinstance(e,Blocked) and e.reason=='paused':raise

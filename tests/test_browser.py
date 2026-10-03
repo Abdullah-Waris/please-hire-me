@@ -362,7 +362,8 @@ def test_required_cover_letter_is_generated_uploaded_and_confirmed(store,ats,mon
 
 
 @pytest.mark.parametrize('ats',['otp'],indirect=True)
-def test_gmail_code_continues_the_same_application_without_model_access(store,ats,monkeypatch):
+@pytest.mark.parametrize('screenshot_failure',[False,True])
+def test_gmail_code_continues_the_same_application_without_model_access(store,ats,monkeypatch,screenshot_failure):
     store.update_settings({'gmail_verification':True})
     class Mailbox:
         def __init__(self,s):self.store=s
@@ -370,7 +371,13 @@ def test_gmail_code_continues_the_same_application_without_model_access(store,at
             assert company=='Synthetic ATS' and length==8
             return 'ABC12345'
     monkeypatch.setattr('hireme.gmail.GmailClient',Mailbox)
-    with Browser(store,test_url=ats[0]) as b:assert b.apply(local_job(store,ats))=='confirmed'
+    with Browser(store,test_url=ats[0]) as b:
+        original=b.page.screenshot
+        def screenshot(**kwargs):
+            if screenshot_failure and not str(kwargs['path']).endswith('-before.jpg'):raise TimeoutError('slow screenshot')
+            return original(**kwargs)
+        monkeypatch.setattr(b.page,'screenshot',screenshot)
+        assert b.apply(local_job(store,ats))=='confirmed'
     assert len(ats[1])==1
     app=store.db.execute('SELECT * FROM applications').fetchone()
     assert app['state']=='confirmed'
@@ -616,3 +623,15 @@ def test_ashby_radio_question_inherits_required_heading(store,ats):
         b.page.set_content('<fieldset class="_fieldEntry_x ashby-application-form-input-radio-group"><label class="ashby-application-form-question-title _required_x">Can you work in our office?</label><label><input type="radio" name="office" value="yes">Yes</label><label><input type="radio" name="office" value="no">No</label></fieldset>')
         f=b._snapshot()[0]
         assert f['required'] and f['type']=='radio' and f['label']=='Can you work in our office?'
+
+
+def test_outcome_screenshot_failure_does_not_lose_confirmation(store,ats,monkeypatch):
+    with Browser(store,test_url=ats[0]) as b:
+        screenshot=b.page.screenshot
+        def fail_after(**kwargs):
+            if str(kwargs['path']).endswith('-after.jpg'):raise TimeoutError('slow screenshot')
+            return screenshot(**kwargs)
+        monkeypatch.setattr(b.page,'screenshot',fail_after)
+        assert b.apply(local_job(store,ats))=='confirmed'
+    app=store.db.execute('SELECT state,screenshot FROM applications').fetchone()
+    assert app['state']=='confirmed' and app['screenshot']==''
