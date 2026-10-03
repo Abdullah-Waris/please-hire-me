@@ -18,6 +18,8 @@ def main(argv=None):
     parser.add_argument('--data-dir',type=Path,default=DEFAULT_ROOT)
     sub=parser.add_subparsers(dest='command',required=True)
     p=sub.add_parser('open-dashboard');p.add_argument('--port',type=int,default=8766)
+    p=sub.add_parser('demo',help='Explore a disposable, read-only sample workspace');p.add_argument('--port',type=int,default=8767)
+    p=sub.add_parser('export-ledger',help='Save job metadata as a CSV spreadsheet');p.add_argument('path',type=Path)
     p=sub.add_parser('dashboard');p.add_argument('--port',type=int,default=8766)
     p=sub.add_parser('import-material');p.add_argument('path',type=Path);p.add_argument('--kind',choices=['writing_sample','cover_letter','context'],required=True)
     p=sub.add_parser('import-resume');p.add_argument('path',type=Path);p.add_argument('--transcript',action='store_true')
@@ -41,6 +43,9 @@ def main(argv=None):
     p=sub.add_parser('import-legacy');p.add_argument('path',type=Path,default=REPO,nargs='?')
     args=parser.parse_args(argv)
     os.umask(0o077)
+    if args.command=='demo':
+        from .demo import run
+        run(REPO,args.port);return 0
     if args.command=='restore':
         from .backup import restore_backup
         try:print(json.dumps(restore_backup(args.path,args.data_dir.expanduser().absolute())));return 0
@@ -58,6 +63,13 @@ def main(argv=None):
             from .onboarding import model_candidates
             from .provider import ManagedProvider
             print(json.dumps(model_candidates(store,ManagedProvider(store,store.settings()['model_timeout_seconds']))))
+        elif args.command=='export-ledger':
+            from .ledger import export_csv
+            path=args.path.expanduser()
+            try:
+                with path.open('xb') as output:output.write(export_csv(store))
+            except FileExistsError:raise ValueError('Choose a new export filename; existing files are not overwritten')
+            print('Application ledger exported to '+str(path))
         elif args.command=='backup':
             from .backup import create_backup
             print(json.dumps(create_backup(store,args.path)))

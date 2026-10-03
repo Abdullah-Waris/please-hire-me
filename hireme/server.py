@@ -26,8 +26,8 @@ def dashboard_url(root,port=8766):
     return f'http://127.0.0.1:{port}/#token={token}'
 
 
-def serve(root,repo,port=8766,token=None):
-    token=token or dashboard_url(root,port).split('#token=',1)[1]; state={'running':False,'lock':threading.Lock()}
+def serve(root,repo,port=8766,token=None,demo=False):
+    token=token or (secrets.token_urlsafe(32) if demo else dashboard_url(root,port).split('#token=',1)[1]); state={'running':False,'lock':threading.Lock()}
     assets=Path(__file__).parent/'static'
     def start_cycle():
         with state['lock']:
@@ -50,12 +50,13 @@ def serve(root,repo,port=8766,token=None):
         def _auth(self):
             origin=self.headers.get('Origin')
             return self._valid_host() and secrets.compare_digest(self.headers.get('X-Hireme-Token',''),token) and origin in (None,f'http://127.0.0.1:{port}',f'http://localhost:{port}')
-        def send(self,code,data,ctype='application/json'):
+        def send(self,code,data,ctype='application/json',download=None):
             body=json.dumps(data).encode() if ctype=='application/json' else data
             self.send_response(code)
             self.send_header('Content-Type',ctype);self.send_header('Content-Length',str(len(body)))
             self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff')
             self.send_header('Referrer-Policy','no-referrer')
+            if download:self.send_header('Content-Disposition',f'attachment; filename="{download}"')
             self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'")
             self.end_headers();self.wfile.write(body)
         def do_GET(self):
@@ -74,8 +75,17 @@ def serve(root,repo,port=8766,token=None):
                     from .reports import report_status
                     snapshot['gmail']=gmail_status(store);snapshot['reports']=report_status(store)
                     from .setup_status import readiness
-                    snapshot['readiness']=readiness(store)
+                    if demo:
+                        from .demo import DEMO_READINESS
+                        snapshot['readiness']={**DEMO_READINESS,'missing':store.missing_setup()}
+                    else:snapshot['readiness']=readiness(store)
+                    from .ledger import summary
+                    snapshot['summary']=summary(store)
+                    snapshot['demo']=demo
                     return self.send(200,{**snapshot,'fact_labels':FACTS,'required':sorted(REQUIRED),'worker_running':state['running'] or any(r['status']=='running' for r in snapshot['runs'])})
+                if path=='/api/export.csv':
+                    from .ledger import export_csv
+                    return self.send(200,export_csv(store),'text/csv; charset=utf-8',download='application-ledger.csv')
                 if path.startswith('/api/screenshot/'):
                     name=path.rsplit('/',1)[-1]
                     if '/' in name or '..' in name:return self.send(400,{'error':'Invalid screenshot'})
@@ -86,6 +96,7 @@ def serve(root,repo,port=8766,token=None):
             finally:store.close()
         def do_POST(self):
             if not self._auth():return self.send(403,{'error':'Unauthorized local request'})
+            if demo:return self.send(403,{'error':'This is a read-only sample workspace. Start the regular dashboard to save your own information.'})
             try:
                 size=int(self.headers.get('Content-Length','0'))
                 if not 0<size<=MAX_BODY:return self.send(413,{'error':'Request too large'})

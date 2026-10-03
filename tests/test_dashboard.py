@@ -321,3 +321,86 @@ def test_workspace_real_counts_search_sort_and_mobile_navigation(store, tmp_path
             browser.close()
     finally:
         process.terminate(); process.join(5)
+
+
+def launch_demo(root, repo, port):
+    from hireme.demo import seed
+    from hireme.store import Store
+    store = Store(Path(root)); seed(store); store.close()
+    serve(Path(root), Path(repo), port, token='fixture-capability', demo=True)
+
+
+def test_demo_is_read_only_and_export_requires_auth(tmp_path):
+    from playwright.sync_api import sync_playwright, expect
+    root = tmp_path / 'sample'
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch_demo, args=(str(root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        try: urllib.request.urlopen(base + '/api/export.csv'); assert False
+        except urllib.error.HTTPError as error: assert error.code == 403
+        for endpoint in ('pause', 'resume-worker', 'run', 'facts', 'settings', 'complete-setup'):
+            request = urllib.request.Request(base + '/api/' + endpoint, data=b'{}', headers={'X-Hireme-Token': 'fixture-capability'})
+            try: urllib.request.urlopen(request); assert False
+            except urllib.error.HTTPError as error:
+                assert error.code == 403 and 'read-only' in error.read().decode()
+        request = urllib.request.Request(base + '/api/export.csv', headers={'X-Hireme-Token': 'fixture-capability'})
+        with urllib.request.urlopen(request) as response:
+            assert response.headers['Content-Disposition'] == 'attachment; filename="application-ledger.csv"'
+            assert b'Cedar Labs' in response.read()
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page()
+            page.goto(base + '/#token=fixture-capability')
+            expect(page.locator('#demo-banner')).to_be_visible()
+            expect(page.locator('#metric-submitted')).to_have_text('2')
+            expect(page.locator('#run')).to_be_disabled(); expect(page.locator('#pause')).to_be_disabled()
+            assert page.locator('#jobs a[href]').count() == 0
+            with page.expect_download() as download:
+                page.locator('#export-ledger').click()
+            assert download.value.suggested_filename == 'application-ledger.csv'
+            assert not download.value.failure()
+            browser.close()
+    finally: process.terminate(); process.join(5)
+
+
+def test_unsaved_forms_survive_refresh_and_invalid_aliases_are_actionable(tmp_path):
+    from playwright.sync_api import sync_playwright, expect
+    root = tmp_path / 'private'
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(); errors = []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(base + '/#token=fixture-capability')
+            page.locator('[data-view=profile]').click()
+            field = page.locator('#facts-form [name=full_name]')
+            field.fill('Unsaved Candidate'); field.blur()
+            page.evaluate('refresh()')
+            expect(field).to_have_value('Unsaved Candidate')
+            page.locator('[data-view=settings]').click()
+            locations = page.locator('#settings-form [name=locations]')
+            locations.fill('Unsaved location'); locations.blur()
+            page.evaluate('refresh()')
+            expect(locations).to_have_value('Unsaved location')
+            page.locator('#settings-form [name=company_aliases]').fill('{broken JSON')
+            page.get_by_role('button', name='Save preferences', exact=True).click()
+            expect(page.locator('#notice')).to_contain_text('Company aliases must be a valid JSON object')
+            expect(page.get_by_role('button', name='Save preferences', exact=True)).to_be_enabled()
+            expect(locations).to_have_value('Unsaved location')
+            page.route('**/api/state*', lambda route: route.abort())
+            page.evaluate('refresh()')
+            expect(page.locator('#connection-status')).to_be_visible()
+            page.unroute('**/api/state*'); page.locator('#retry-connection').click()
+            expect(page.locator('#connection-status')).to_be_hidden()
+            expect(locations).to_have_value('Unsaved location')
+            assert not errors
+            browser.close()
+    finally: process.terminate(); process.join(5)

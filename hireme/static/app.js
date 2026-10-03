@@ -4,8 +4,18 @@ const token=new URLSearchParams(location.hash.slice(1)).get('token')||sessionSto
 if(token)sessionStorage.setItem('hireme-token',token);
 history.replaceState(null,'',location.pathname);
 let state=null,view='today';
+let refreshing=null;
+const dirtyForms=new WeakSet();
+document.addEventListener('input',event=>{if(event.target.form)dirtyForms.add(event.target.form);});
+document.addEventListener('change',event=>{if(event.target.form)dirtyForms.add(event.target.form);});
+function editing(selector) {
+  const form=$(selector);
+  return form.contains(document.activeElement)||dirtyForms.has(form);
+}
+function saved(form) { if(form)dirtyForms.delete(form); }
+
 function renderAccounts(){
-  const parent=document.querySelector('#employer-accounts');parent.replaceChildren();
+  const parent=document.querySelector('#employer-accounts');if([...parent.querySelectorAll('form')].some(form=>dirtyForms.has(form)||form.contains(document.activeElement)))return;parent.replaceChildren();
   const accounts=state.employer_accounts||[];
   if(!accounts.length)return empty(parent,'No employer accounts created by this worker.');
   for(const account of accounts){
@@ -16,7 +26,7 @@ function renderAccounts(){
       evidence.setAttribute('aria-label',`Account confirmation evidence for ${account.company}`);
       evidence.placeholder='How did you verify that this account exists and you can sign in?';
       form.append(evidence,el('button','Confirm verified account'));
-      form.onsubmit=async event=>{event.preventDefault();try{await api('/api/account-confirm',{id:account.id,note:evidence.value});await refresh();note('Account confirmed. The next batch can reuse its credentials.');}catch(error){note(error.message,true);}};
+      form.onsubmit=async event=>{event.preventDefault();try{await api('/api/account-confirm',{id:account.id,note:evidence.value});saved(form);document.activeElement.blur();await refresh();note('Account confirmed. The next batch can reuse its credentials.');}catch(error){note(error.message,true);}};
       box.append(form);
     }
     parent.append(box);
@@ -25,9 +35,21 @@ function renderAccounts(){
 const $=s=>document.querySelector(s);
 const el=(tag,text,cls)=>{const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(cls)n.className=cls;return n;};
 const note=(text,error=false)=>{const notice=$('#notice');notice.textContent=text;notice.classList.toggle('error',error);notice.setAttribute('role',error?'alert':'status');};
-async function api(path,data,raw=false,extraHeaders={}){const r=await fetch(path,{method:data===undefined?'GET':'POST',headers:{...extraHeaders,'X-Hireme-Token':token,...(!raw&&data!==undefined?{'Content-Type':'application/json'}:{})},body:data===undefined?undefined:raw?data:JSON.stringify(data)});const v=await r.json();if(!r.ok)throw new Error(v.error||'Request failed');return v;}
-function show(name){view=name;document.querySelectorAll('.view').forEach(n=>n.hidden=n.id!==name);document.querySelectorAll('[data-view]').forEach(n=>n.setAttribute('aria-current',n.dataset.view===name?'page':'false'));$('#heading').textContent={setup:'Make it yours',providers:'Your model connection',today:'Today’s applications',questions:'A few things need you',profile:'Your verified facts',materials:'Your writing and context',connections:'Email automation',settings:'Your search preferences'}[name];$('#subheading').textContent={setup:'Set up once. Save as you go.',providers:'Choose who processes your application context.',today:'A real record of what the worker submitted, held and discovered.',questions:'Resolve the exception. Let the next cycle do the rest.',profile:'Saved once, reused across applications. Unknown means unknown.',materials:'Reviewed sources guide the voice and facts in your applications.',connections:'Verification codes and batch reports for your application email.',settings:'Choose your search boundaries. Throughput never overrides them.'}[name];}
-function link(url,text){const a=el('a',text);if(/^https:\/\//.test(url)){a.href=url;a.target='_blank';a.rel='noopener noreferrer';}return a;}
+async function api(path,data,raw=false,extraHeaders={}) {
+  let response;
+  try {
+    response=await fetch(path,{method:data===undefined?'GET':'POST',headers:{...extraHeaders,'X-Hireme-Token':token,...(!raw&&data!==undefined?{'Content-Type':'application/json'}:{})},body:data===undefined?undefined:raw?data:JSON.stringify(data)});
+  }catch{throw new Error('Cannot reach your application desk. Check that the dashboard is still running, then try again.');}
+  let value;
+  try{value=await response.json();}catch{throw new Error('The dashboard returned an unexpected response. Refresh the page and try again.');}
+  if(!response.ok)throw new Error(value.error||'Request failed');
+  // Successful saves release draft protection only for the form that was saved.
+  const forms={'/api/facts':'#facts-form','/api/template':'#template-form','/api/context-text':'#context-form'};
+  if(forms[path])saved($(forms[path]));
+  return value;
+}
+function show(name){view=name;$('#page-eyebrow').textContent={setup:'YOUR NEXT CHAPTER',today:'YOUR SEARCH, IN MOTION',questions:'A LITTLE HELP GOES A LONG WAY',profile:'THE FACTS THAT MAKE YOU, YOU',materials:'YOUR EXPERIENCE, IN YOUR WORDS',settings:'A SEARCH THAT FITS YOUR LIFE',providers:'YOUR CHOICE OF MODEL',connections:'KEEP YOUR SEARCH CONNECTED'}[name];document.querySelectorAll('.view').forEach(n=>n.hidden=n.id!==name);document.querySelectorAll('[data-view]').forEach(n=>n.setAttribute('aria-current',n.dataset.view===name?'page':'false'));$('#heading').textContent={setup:'Make it yours',providers:'Your model connection',today:'Today’s applications',questions:'A few things need you',profile:'Your verified facts',materials:'Your writing and context',connections:'Email automation',settings:'Your search preferences'}[name];$('#subheading').textContent={setup:'Set up once. Save as you go.',providers:'Choose who processes your application context.',today:'A real record of what the worker submitted, held and discovered.',questions:'Resolve the exception. Let the next cycle do the rest.',profile:'Saved once, reused across applications. Unknown means unknown.',materials:'Reviewed sources guide the voice and facts in your applications.',connections:'Verification codes and batch reports for your application email.',settings:'Choose your search boundaries. Throughput never overrides them.'}[name];}
+function link(url,text){const a=el('a',text);if(!state?.demo&&/^https:\/\//.test(url)){a.href=url;a.target='_blank';a.rel='noopener noreferrer';}return a;}
 function date(v){return v?new Date(v).toLocaleString(undefined,{dateStyle:'medium',timeStyle:'short'}):'—';}
 function empty(parent,text,title='Nothing here yet',symbol='◇') {
   const box=el('div',undefined,'empty');
@@ -36,8 +58,10 @@ function empty(parent,text,title='Nothing here yet',symbol='◇') {
 }
 const statusLabels={confirmed:'Submitted',blocked:'Needs action',unknown:'Uncertain',awaiting_verification:'Check email',discovered:'Ready to evaluate',rejected:'Not a match',skipped:'Skipped',attempting:'Applying',manual:'Manual handling'};
 function jobPayload(job) { try{return JSON.parse(job.payload);}catch{return {};} }
+let ledgerSignature='';
 function renderLedger() {
   if(!state)return;
+  $('#ledger-scope').textContent=state.summary&&state.summary.job_count>state.jobs.length?`Showing ${state.jobs.length} highest-ranked opportunities of ${state.summary.job_count}. Export CSV includes the full ledger.`:'';
   const query=$('#job-search').value.trim().toLocaleLowerCase();
   const filter=$('#status-filter').value;
   const jobs=state.jobs.filter(job=>{
@@ -47,7 +71,7 @@ function renderLedger() {
   const sort=$('#job-sort').value;
   jobs.sort((a,b)=>sort==='fit'?b.score-a.score:sort==='company'?a.company.localeCompare(b.company):String(b.first_seen).localeCompare(String(a.first_seen)));
   $('#ledger-count').textContent=String(jobs.length);
-  table(jobs,$('#jobs'),query||filter!=='all');
+  const signature=JSON.stringify([jobs,state.applications,query,filter,sort]);if(signature!==ledgerSignature){table(jobs,$('#jobs'),query||filter!=='all');ledgerSignature=signature;}
 }
 function table(jobs,parent,filtered=false) {
   parent.replaceChildren();
@@ -110,34 +134,98 @@ function attentionCount() {
   return jobIds.size+(state.employer_accounts||[]).filter(a=>a.state==='uncertain').length;
 }
 function renderOverview(submitted) {
-  const count=attentionCount(),ready=state.jobs.filter(j=>j.status==='discovered').length;
-  $('#metric-submitted').textContent=String(submitted.length);
+  const count=state.summary?.attention_count??attentionCount(),ready=state.summary?.status_counts.discovered??state.jobs.filter(j=>j.status==='discovered').length;
+  $('#metric-submitted').textContent=String(submitted);
   $('#metric-submitted-help').textContent=`of ${state.settings.target_per_day} daily target`;
-  $('#submission-progress').max=state.settings.target_per_day;$('#submission-progress').value=submitted.length;
+  $('#submission-progress').max=state.settings.target_per_day;$('#submission-progress').value=submitted;
   $('#metric-attention').textContent=String(count);
   $('#metric-attention-help').textContent=count===0?'You’re all caught up':`${count===1?'One item needs':`${count} items need`} a little help`;
-  $('#metric-opportunities').textContent=String(state.jobs.length);
+  $('#metric-opportunities').textContent=String(state.summary?.job_count??state.jobs.length);
   $('#metric-ready').textContent=ready?`${ready} ready to evaluate`:'Discovery is ready when you are';
   $('#worker-dot').classList.toggle('enabled',state.settings.live_enabled);
   $('#workspace-date').textContent=new Intl.DateTimeFormat(undefined,{weekday:'long',month:'long',day:'numeric',timeZone:state.settings.timezone}).format(new Date()).toUpperCase();
   $('#question-count').textContent=count?String(count):'';
 }
-function renderQuestions(){const q=$('#question-list');q.replaceChildren();if(!state.questions.length)empty(q,'No unanswered personal questions. New questions will appear here without stopping the rest of the search.');for(const x of state.questions){const box=el('article',undefined,'question');box.append(el('h3',x.label));const job=state.jobs.find(j=>j.id===x.job_id);if(job)box.append(link(job.url,`${job.company} · ${job.title}`));box.append(el('p',x.reason,'subtle'));const f=el('form');const options=JSON.parse(x.options);const input=options.length?el('select'):el('textarea');input.required=true;input.setAttribute('aria-label',x.label);if(options.length){input.append(new Option('Choose an answer',''));options.forEach(v=>input.append(new Option(v,v)));}else input.rows=3;const bind=el('select');bind.setAttribute('aria-label','Optional confirmed fact');bind.append(new Option('Save as an exact answer to this question',''));for(const [k,v] of Object.entries(state.facts)){if(v.confirmed)bind.append(new Option(`Use ${state.fact_labels[k]}: ${v.value}`,k));}bind.onchange=()=>{if(bind.value)input.value=state.facts[bind.value].value;};const b=el('button','Save once and reuse');f.append(input,bind,b);f.onsubmit=async e=>{e.preventDefault();try{await api('/api/answer',{id:x.id,value:input.value,fact_key:bind.value||null});note('Answer saved. Matching applications can use it in the next cycle.');await refresh();}catch(e){note(e.message,true);}};box.append(f);q.append(box);}table(state.jobs.filter(j=>j.status==='blocked'),$('#blocked-jobs'));const u=$('#uncertain');u.replaceChildren();const unknown=state.applications.filter(a=>['unknown','awaiting_verification'].includes(a.state));if(!unknown.length)empty(u,'No uncertain submissions.');for(const a of unknown){const box=el('article',undefined,'question');const job=state.jobs.find(j=>j.id===a.job_id);box.append(el('h3',job?`${job.company} · ${job.title}`:a.job_id));if(job)box.append(link(job.url,'Verify at the employer'));if(a.state==='awaiting_verification')box.append(el('p','Email verification pending. This application is held and will not be retried automatically.','subtle')); const f=el('form'),select=el('select');select.setAttribute('aria-label','Verified outcome');select.append(new Option('Employer confirms submission','true'),new Option('Verified no submission occurred','false'));const text=el('textarea');text.required=true;text.minLength=10;text.rows=2;text.placeholder='How did you verify the outcome?';text.setAttribute('aria-label','Verification evidence');const b=el('button','Record verified outcome');f.append(select,text,b);f.onsubmit=async e=>{e.preventDefault();try{await api('/api/reconcile',{id:a.id,submitted:select.value==='true',note:text.value});await refresh();note('Outcome recorded. A non-submitted attempt remains held for manual handling.');}catch(e){note(e.message,true);}};box.append(f);u.append(box);}}
+function renderQuestions(){if([...document.querySelectorAll('#questions form')].some(form=>dirtyForms.has(form)||form.contains(document.activeElement)))return;const q=$('#question-list');q.replaceChildren();if(!state.questions.length)empty(q,'No unanswered personal questions. New questions will appear here without stopping the rest of the search.');for(const x of state.questions){const box=el('article',undefined,'question');box.append(el('h3',x.label));const job=state.jobs.find(j=>j.id===x.job_id);if(job)box.append(link(job.url,`${job.company} · ${job.title}`));box.append(el('p',x.reason,'subtle'));const f=el('form');const options=JSON.parse(x.options);const input=options.length?el('select'):el('textarea');input.required=true;input.setAttribute('aria-label',x.label);if(options.length){input.append(new Option('Choose an answer',''));options.forEach(v=>input.append(new Option(v,v)));}else input.rows=3;const bind=el('select');bind.setAttribute('aria-label','Optional confirmed fact');bind.append(new Option('Save as an exact answer to this question',''));for(const [k,v] of Object.entries(state.facts)){if(v.confirmed)bind.append(new Option(`Use ${state.fact_labels[k]}: ${v.value}`,k));}bind.onchange=()=>{if(bind.value)input.value=state.facts[bind.value].value;};const b=el('button','Save once and reuse');f.append(input,bind,b);f.onsubmit=async e=>{e.preventDefault();try{await api('/api/answer',{id:x.id,value:input.value,fact_key:bind.value||null});saved(f);document.activeElement.blur();note('Answer saved. Matching applications can use it in the next cycle.');await refresh();}catch(e){note(e.message,true);}};box.append(f);q.append(box);}table(state.jobs.filter(j=>j.status==='blocked'),$('#blocked-jobs'));const u=$('#uncertain');u.replaceChildren();const unknown=state.applications.filter(a=>['unknown','awaiting_verification'].includes(a.state));if(!unknown.length)empty(u,'No uncertain submissions.');for(const a of unknown){const box=el('article',undefined,'question');const job=state.jobs.find(j=>j.id===a.job_id);box.append(el('h3',job?`${job.company} · ${job.title}`:a.job_id));if(job)box.append(link(job.url,'Verify at the employer'));if(a.state==='awaiting_verification')box.append(el('p','Email verification pending. This application is held and will not be retried automatically.','subtle')); const f=el('form'),select=el('select');select.setAttribute('aria-label','Verified outcome');select.append(new Option('Employer confirms submission','true'),new Option('Verified no submission occurred','false'));const text=el('textarea');text.required=true;text.minLength=10;text.rows=2;text.placeholder='How did you verify the outcome?';text.setAttribute('aria-label','Verification evidence');const b=el('button','Record verified outcome');f.append(select,text,b);f.onsubmit=async e=>{e.preventDefault();try{await api('/api/reconcile',{id:a.id,submitted:select.value==='true',note:text.value});saved(f);document.activeElement.blur();await refresh();note('Outcome recorded. A non-submitted attempt remains held for manual handling.');}catch(e){note(e.message,true);}};box.append(f);u.append(box);}}
 const groups={ 'Contact':['full_name','first_name','last_name','preferred_name','email','phone','location','street','city','state','postal_code','country','linkedin','github','website'], 'Education & experience':['school','high_school','degree','major','graduation','college_start','highest_completed_degree','gpa','professional_years','skills'], 'Authorization & availability':['work_authorized_us','needs_sponsorship','citizenship','us_person','unrestricted_authorization','earliest_start','latest_start','salary','notice_period','relocate','onsite','summer_2027_relocate','worked_outside_resume','contacts_outside_resume'], 'Optional disclosures & consent':['race','gender','veteran','disability','recording','background_check','sms','native_name']};
 function renderFacts(){const parent=$('#fact-fields');parent.replaceChildren();for(const [name,keys] of Object.entries(groups)){const group=el('fieldset',undefined,'fact-group');group.append(el('legend',name));const grid=el('div',undefined,'form-grid');for(const key of keys){const label=el('label',state.fact_labels[key]+(state.required.includes(key)?' · required':''));const input=el('input');input.name=key;input.value=state.facts[key]?.value||'';if(state.required.includes(key))input.required=true;if(state.facts[key]&&!state.facts[key].confirmed)label.append(el('span','Extracted from resume — please confirm','candidate'));label.append(input);grid.append(label);}group.append(grid);parent.append(group);}$('#resume-state').textContent=state.documents.some(x=>x.kind==='resume')?'Resume imported and stored privately.':'No resume imported.';$('#transcript-state').textContent=state.documents.some(x=>x.kind==='transcript')?'Transcript imported and stored privately. Upload another PDF to replace it.':'No transcript imported. Jobs requiring one will appear in Needs you.';$('#setup-status').textContent=state.missing_setup.length?'Still needed: '+state.missing_setup.map(k=>state.fact_labels[k]||k).join(', '):'Required facts are confirmed. You can start automatic applications.';$('#complete-setup').disabled=state.missing_setup.length>0;}
 function renderTemplates(){const p=$('#templates');p.replaceChildren();for(const t of state.templates){const d=el('details');d.append(el('summary',t.category+' · '+t.body.slice(0,70)),el('p',t.body));p.append(d);}}
 function renderSettings(){const f=$('#settings-form');for(const input of f.elements){if(!input.name)continue;const v=state.settings[input.name];if(input.type==='checkbox'){input.checked=!!v;continue;}input.value=Array.isArray(v)?v.join('\n'):typeof v==='object'?JSON.stringify(v,null,2):v;}}
-function render(){const today=new Intl.DateTimeFormat('en-CA',{timeZone:state.settings.timezone}).format(new Date());const submitted=state.applications.filter(a=>a.state==='confirmed'&&a.attempted&&new Intl.DateTimeFormat('en-CA',{timeZone:state.settings.timezone}).format(new Date(a.attempted))===today);renderOverview(submitted);$('#daily-progress').textContent=submitted.length>=state.settings.target_per_day?'Daily target reached. Every step counts.':`${submitted.length} confirmed today · ${Math.max(0,state.settings.target_per_day-submitted.length)} to your daily target` ;$('#daily-target').textContent=`Daily target: ${state.settings.target_per_day}`;$('#setup-callout').hidden=state.settings.onboarding_complete;$('#worker-state').textContent=state.worker_running?(state.settings.live_enabled?'Cycle running':'Pausing active cycle…'):!state.settings.onboarding_complete?'Setup needed':state.settings.live_enabled?'Automatic submissions enabled':'Submissions paused';$('#pause').textContent=state.settings.live_enabled?'Pause':'Resume';$('#pause').disabled=!state.settings.onboarding_complete;$('#run').disabled=state.worker_running||!state.settings.onboarding_complete||!state.settings.live_enabled;renderLedger();renderSetup();renderQuestions();renderAccounts();renderTemplates();renderMaterials();renderMail();if(!document.activeElement.closest('#facts-form'))renderFacts();if(!document.activeElement.closest('#settings-form'))renderSettings();const r=$('#runs');r.replaceChildren();if(!state.runs.length)empty(r,'Finish your setup and start a batch. This is where you’ll see what ran and how it went.','Your desk is ready for its first batch','↻');for(const run of state.runs){const row=el('div',undefined,'run-row');let detail=run.detail;try{const d=JSON.parse(detail);detail=`${d.confirmed||0} confirmed; ${d.attempts||0} attempted. ${d.target===undefined?'':`Target ${d.target}; shortfall ${d.shortfall}. `}${Object.entries(d.outcomes||{}).filter(([k])=>k!=='confirmed').map(([k,v])=>`${k}: ${v}`).join('; ')} ${d.reason||Object.entries(d.reasons||{}).map(([k,v])=>`${k}: ${v}`).join('; ')}`;}catch{}row.append(el('span',date(run.started)),el('span',run.status),el('span',detail));r.append(row);}const s=$('#sources');s.replaceChildren();for(const source of state.sources)s.append(el('p',`${source.id}: ${source.status} · ${date(source.checked)}${source.error?' · '+source.error:''}`));show(view);}
-async function refresh(){try{state=await api('/api/state?material_offset='+materialOffset);render();}catch(e){note(e.message,true);}}
+function renderRuns() {
+  const parent=$('#runs');parent.replaceChildren();
+  if(!state.runs.length){empty(parent,'Finish your setup and start a batch. This is where you’ll see what ran and how it went.','Your desk is ready for its first batch','↻');return;}
+  for(const run of state.runs){
+    const row=el('div',undefined,'run-row');let detail=run.detail;
+    try{
+      const data=JSON.parse(detail);
+      const outcomes=Object.entries(data.outcomes||{}).filter(([key])=>key!=='confirmed').map(([key,value])=>`${statusLabels[key]||key.replaceAll('_',' ')}: ${value}`).join('; ');
+      const reason=data.reason||Object.entries(data.reasons||{}).map(([key,value])=>`${key.replaceAll('_',' ')}: ${value}`).join('; ');
+      detail=`${data.confirmed||0} submitted · ${data.attempts||0} attempted. ${outcomes} ${reason}`.trim();
+    }catch{}
+    row.append(el('span',date(run.started)),el('span',run.status.replaceAll('_',' ')),el('span',detail));parent.append(row);
+  }
+}
+function render() {
+  const dayFormatter=new Intl.DateTimeFormat('en-CA',{timeZone:state.settings.timezone});
+  const today=dayFormatter.format(new Date());
+  const submitted=state.summary?.submitted_today??state.applications.filter(application=>application.state==='confirmed'&&application.attempted&&dayFormatter.format(new Date(application.attempted))===today).length;
+  renderOverview(submitted);
+  $('#daily-progress').textContent=submitted>=state.settings.target_per_day?'Daily target reached. Every step counts.':`${submitted} confirmed today · ${Math.max(0,state.settings.target_per_day-submitted)} to your daily target`;
+  $('#daily-target').textContent=`Daily target: ${state.settings.target_per_day}`;
+  $('#setup-callout').hidden=state.settings.onboarding_complete;
+  $('#worker-state').textContent=state.demo?'Read-only sample workspace':state.worker_running?(state.settings.live_enabled?'Batch running':'Pausing active batch…'):!state.settings.onboarding_complete?'Setup needed':state.settings.live_enabled?'Automatic submissions enabled':'Submissions paused';
+  $('#pause').textContent=state.settings.live_enabled?'Pause':'Resume';
+  $('#pause').disabled=state.demo||!state.settings.onboarding_complete;
+  $('#run').disabled=state.demo||state.worker_running||!state.settings.onboarding_complete||!state.settings.live_enabled;
+  $('#demo-banner').hidden=!state.demo;
+  renderLedger();renderSetup();renderQuestions();renderAccounts();renderTemplates();renderMaterials();renderMail();
+  if(!editing('#facts-form'))renderFacts();
+  if(!editing('#settings-form'))renderSettings();
+  renderRuns();
+  const sources=$('#sources');sources.replaceChildren();
+  if(!state.sources.length)empty(sources,'Source checks appear after discovery. Your desk keeps earlier opportunities if a source is temporarily unavailable.','Discovery is ready','↗');
+  for(const source of state.sources)sources.append(el('p',`${source.id}: ${source.status} · ${date(source.checked)}${source.error?' · '+source.error:''}`));
+  show(view);
+}
+async function refresh() {
+  if(refreshing){await refreshing;return refresh();}
+  refreshing=(async()=>{
+    try{
+      state=await api('/api/state?material_offset='+materialOffset);
+      render();
+      $('#connection-status').hidden=true;
+    }catch(error){
+      const status=$('#connection-status');status.hidden=false;
+      $('#connection-message').textContent=error.message;
+      if(!state)note(error.message,true);
+    }finally{refreshing=null;}
+  })();
+  return refreshing;
+}
 document.querySelectorAll('[data-view]').forEach(b=>b.onclick=()=>show(b.dataset.view));$('#setup-link').onclick=()=>show('setup');$('#status-filter').onchange=renderLedger;$('#job-sort').onchange=renderLedger;$('#job-search').oninput=renderLedger;$('#review-queue').onclick=()=>show('questions');$('#add-posting').onclick=()=>{const panel=$('#add-posting-panel');panel.open=true;panel.scrollIntoView({block:'center',behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});$('#job-form [name=company]').focus({preventScroll:true});};
 $('#facts-form').onsubmit=async e=>{e.preventDefault();if(!$('#confirm-facts').checked)return;const facts=Object.fromEntries([...new FormData(e.target)].filter(([,v])=>v.trim()));try{await api('/api/facts',{facts});$('#confirm-facts').checked=false;note('Confirmed facts saved. They will be reused automatically.');document.activeElement.blur();await refresh();}catch(e){note(e.message,true);}};
 $('#resume-upload').onchange=async e=>{const f=e.target.files[0];if(!f)return;try{await api('/api/resume',f,true);note('Resume imported. Confirm its extracted values and supply the remaining facts.');await refresh();}catch(e){note(e.message,true);}};
-$('#settings-form').onsubmit=async e=>{e.preventDefault();const data={};for(const input of e.target.elements){if(!input.name)continue;if(input.type==='checkbox')data[input.name]=input.checked;else if(input.type==='number')data[input.name]=Number(input.value);else if(input.name==='company_aliases')data[input.name]=JSON.parse(input.value||'{}');else if(Array.isArray(state.settings[input.name]))data[input.name]=input.value.split('\n').map(v=>v.trim()).filter(Boolean);else data[input.name]=input.value;}try{await api('/api/settings',data);note('Search preferences saved.');document.activeElement.blur();await refresh();}catch(e){note(e.message,true);}};
+$('#settings-form').onsubmit=async event=>{
+  event.preventDefault();
+  try{
+    const data={};
+    for(const input of event.target.elements){
+      if(!input.name)continue;
+      if(input.type==='checkbox')data[input.name]=input.checked;
+      else if(input.type==='number')data[input.name]=Number(input.value);
+      else if(input.name==='company_aliases'){
+        try{data[input.name]=JSON.parse(input.value||'{}');}catch{throw new Error('Company aliases must be a valid JSON object, for example {"Acme Inc": "Acme"}.');}
+      }else if(Array.isArray(state.settings[input.name]))data[input.name]=input.value.split('\n').map(v=>v.trim()).filter(Boolean);
+      else data[input.name]=input.value;
+    }
+    await api('/api/settings',data);saved(event.target);note('Search preferences saved.');document.activeElement.blur();await refresh();
+  }catch(error){note(error.message,true);}
+};
 $('#complete-setup').onclick=async()=>{try{const r=await api('/api/complete-setup',{start:true});note(r.message||'Automatic applications enabled.');await refresh();}catch(e){note(e.message,true);}};
 $('#pause').onclick=async()=>{try{await api(state.settings.live_enabled?'/api/pause':'/api/resume-worker',{});await refresh();}catch(e){note(e.message,true);}};
 $('#run').onclick=async()=>{try{await api('/api/run',{});note('Cycle started. You can keep working; the ledger will update.');await refresh();}catch(e){note(e.message,true);}};
 $('#job-form').onsubmit=async e=>{e.preventDefault();try{await api('/api/job',Object.fromEntries(new FormData(e.target)));e.target.reset();note('Posting added. Eligibility will be checked before any form is filled.');await refresh();}catch(e){note(e.message,true);}};
-refresh().then(()=>{if(state&&!state.settings.onboarding_complete&&view==='today')show('setup');});setInterval(()=>{if(!document.activeElement.matches('input,textarea,select'))refresh();},15000);
+refresh().then(()=>{if(state&&!state.settings.onboarding_complete&&view==='today')show('setup');});setInterval(()=>{if(!document.hidden&&!document.activeElement.matches('input,textarea,select'))refresh();},15000);document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});$('#retry-connection').onclick=refresh;
 
 $('#template-form').onsubmit=async e=>{e.preventDefault();try{await api('/api/template',Object.fromEntries(new FormData(e.target)));e.target.reset();note('Approved wording saved.');await refresh();}catch(e){note(e.message,true);}};
 
@@ -146,7 +234,7 @@ $('#transcript-upload').onchange=async e=>{const input=e.target,f=input.files[0]
 
 function renderMaterials(){
   const list=$('#material-list');
-  if(list.contains(document.activeElement))return;
+  if(list.contains(document.activeElement)||[...list.querySelectorAll('form')].some(form=>dirtyForms.has(form)))return;
   list.replaceChildren();
   if(state.material_count>20){const controls=el('div',undefined,'actions'),previous=el('button','Newer sources','secondary'),next=el('button','Older sources','secondary');previous.disabled=materialOffset===0;next.disabled=materialOffset+20>=state.material_count;previous.onclick=async()=>{materialOffset=Math.max(0,materialOffset-20);await refresh();};next.onclick=async()=>{materialOffset+=20;await refresh();};controls.append(previous,el('p',`${materialOffset+1}–${Math.min(materialOffset+20,state.material_count)} of ${state.material_count}`),next);list.append(controls);}
   if(!state.materials.length)return empty(list,'Upload a writing sample, cover-letter example or supporting document to begin. Each source gets a review before the model uses it.');
@@ -165,7 +253,7 @@ function renderMaterials(){
     approvedLabel.append(approved,document.createTextNode('I reviewed this excerpt and approve its selected use. Uncheck to stop using it.'));
     const button=el('button','Save reviewed source');
     form.append(textLabel,el('p','Keep up to 12,000 characters per reviewed excerpt. Example qualifications belong in style-only sources unless they describe your own work.','help'),roleLabel,approvedLabel,button);
-    form.onsubmit=async event=>{event.preventDefault();button.disabled=true;try{await api('/api/material-review',{id:source.id,text:text.value,role:role.value,confirmed:approved.checked});document.activeElement.blur();await refresh();note('Source saved. Approved use and revisions are recorded.');}catch(error){note(error.message,true);}finally{button.disabled=false;}};
+    form.onsubmit=async event=>{event.preventDefault();button.disabled=true;try{await api('/api/material-review',{id:source.id,text:text.value,role:role.value,confirmed:approved.checked});saved(form);document.activeElement.blur();await refresh();note('Source saved. Approved use and revisions are recorded.');}catch(error){note(error.message,true);}finally{button.disabled=false;}};
     box.append(form);list.append(box);
   }
 }
@@ -182,7 +270,7 @@ function renderMail(){
   const mail=state.gmail;
   $('#gmail-state').textContent=mail.connected?`Authorization saved for ${mail.email}.`:mail.client_configured?'OAuth client saved. Run the connection command below to authorize Gmail.':'No Gmail authorization saved.';
   const form=$('#mail-settings-form');
-  if(!form.contains(document.activeElement))for(const input of form.elements){if(input.name)input.checked=!!state.settings[input.name];}
+  if(!editing('#mail-settings-form'))for(const input of form.elements){if(input.name)input.checked=!!state.settings[input.name];}
   const reports=$('#report-delivery');reports.replaceChildren();
   if(!state.reports.length)empty(reports,'Batch reports appear here after the worker runs. Email delivery is optional.');
   for(const report of state.reports)reports.append(el('p',`${date(report.created)} · ${report.state}${report.last_error?' · '+report.last_error:''}`));
@@ -195,7 +283,7 @@ $('#gmail-client-upload').onchange=async event=>{
 };
 $('#mail-settings-form').onsubmit=async event=>{
   event.preventDefault();const form=event.target;
-  try{await api('/api/settings',{gmail_reports:form.elements.gmail_reports.checked,gmail_verification:form.elements.gmail_verification.checked});document.activeElement.blur();await refresh();note('Email preferences saved.');}catch(error){note(error.message,true);}
+  try{await api('/api/settings',{gmail_reports:form.elements.gmail_reports.checked,gmail_verification:form.elements.gmail_verification.checked});saved(form);document.activeElement.blur();await refresh();note('Email preferences saved.');}catch(error){note(error.message,true);}
 };
 $('#flush-reports').onclick=async event=>{
   const button=event.target;button.disabled=true;
@@ -219,7 +307,7 @@ function renderSetup(){
     if(completed[index])button.setAttribute('aria-label',title+' · ready');
     content.append(button,el('p',description,'help'));row.append(number,content);list.append(row);
   });
-  const f=$('#provider-form');if(!f.contains(document.activeElement))for(const input of f.elements){if(input.name&&input.name!=='key')input.value=state.settings[input.name];}
+  const f=$('#provider-form');if(!editing('#provider-form'))for(const input of f.elements){if(input.name&&input.name!=='key')input.value=state.settings[input.name];}
   $('#provider-state').textContent=checks.provider.message;
   $('#provider-instructions').textContent=state.settings.provider==='claude-cli'?'claude auth login':state.settings.provider==='codex-cli'?'codex login':'Use your vendor’s console to create a key and select an accessible model ID.';
   $('#finish-paused').disabled=state.missing_setup.length>0;$('#finish-start').disabled=state.missing_setup.length>0;
@@ -229,7 +317,7 @@ $('#begin-setup').onclick=()=>goSetup(0);
 $('#setup-back').onclick=()=>goSetup(Math.max(0,setupStep-1));
 $('#setup-next').onclick=()=>{if(setupStep===0&&!state.documents.some(d=>d.kind==='resume'))return note('Import a resume before continuing.',true);if(setupStep===1&&state.missing_setup.length)return note('Confirm the required facts before continuing: '+state.missing_setup.join(', '),true);goSetup(Math.min(setupSteps.length-1,setupStep+1));};
 $('#setup-exit').onclick=()=>{$('#guided-setup').hidden=true;setupStep=-1;show('today');};
-$('#provider-form').onsubmit=async event=>{event.preventDefault();const form=event.target;const provider=form.elements.provider.value;try{if(provider.endsWith('-api')&&!form.elements.provider_model.value.trim())throw new Error('Enter an exact model ID for API mode.');if(form.elements.key.value){await api('/api/provider-key',{provider,key:form.elements.key.value});form.elements.key.value='';}await api('/api/settings',{provider,provider_model:form.elements.provider_model.value.trim(),deployment:form.elements.deployment.value});document.activeElement.blur();await refresh();note('Connection saved. Check login before starting.');}catch(error){note(error.message,true);}};
+$('#provider-form').onsubmit=async event=>{event.preventDefault();const form=event.target;const provider=form.elements.provider.value;try{if(provider.endsWith('-api')&&!form.elements.provider_model.value.trim())throw new Error('Enter an exact model ID for API mode.');if(form.elements.key.value){await api('/api/provider-key',{provider,key:form.elements.key.value});form.elements.key.value='';}await api('/api/settings',{provider,provider_model:form.elements.provider_model.value.trim(),deployment:form.elements.deployment.value});saved(form);document.activeElement.blur();await refresh();note('Connection saved. Check login before starting.');}catch(error){note(error.message,true);}};
 $('#check-provider').onclick=async event=>{event.target.disabled=true;try{const result=await api('/api/provider-check',{});$('#provider-state').textContent=result.provider.message;note(result.provider.message,!result.provider.ready);}catch(error){note(error.message,true);}finally{event.target.disabled=false;}};
 $('#remove-provider-key').onclick=async()=>{try{await api('/api/remove-provider-key',{});await refresh();note('Saved API key removed.');}catch(error){note(error.message,true);}};
 async function finishSetup(start){try{const result=await api('/api/complete-setup',{start});$('#guided-setup').hidden=true;setupStep=-1;await refresh();show('today');note(result.message);}catch(error){note(error.message,true);}}
@@ -255,3 +343,39 @@ function organizePreferences() {
   grid.remove();
 }
 organizePreferences();
+
+// Prevent duplicate requests while a form or immediate worker action is pending.
+document.addEventListener('submit',event=>{
+  const form=event.target;
+  if(!form.onsubmit)return;
+  if(form.dataset.saving==='true'){event.preventDefault();event.stopImmediatePropagation();return;}
+  const handler=form.onsubmit;
+  form.onsubmit=null;
+  event.preventDefault();
+  form.dataset.saving='true';
+  const buttons=[...form.querySelectorAll('button[type="submit"],button:not([type])')];
+  const previous=buttons.map(button=>button.disabled);
+  buttons.forEach(button=>button.disabled=true);
+  Promise.resolve(handler.call(form,event)).catch(error=>note(error.message,true)).finally(()=>{
+    buttons.forEach((button,index)=>button.disabled=previous[index]);
+    delete form.dataset.saving;form.onsubmit=handler;
+  });
+},true);
+for(const id of ['pause','run','complete-setup','finish-paused','finish-start']){
+  const button=$('#'+id),handler=button.onclick;
+  button.onclick=async event=>{
+    if(button.dataset.busy==='true')return;
+    button.dataset.busy='true';button.disabled=true;
+    try{await handler.call(button,event);}finally{delete button.dataset.busy;if(state)render();}
+  };
+}
+
+$('#export-ledger').onclick=async event=>{
+  const button=event.currentTarget;button.disabled=true;
+  try{
+    const response=await fetch('/api/export.csv',{headers:{'X-Hireme-Token':token}});
+    if(!response.ok)throw new Error('Could not export the ledger. Reconnect to your dashboard and try again.');
+    const url=URL.createObjectURL(await response.blob()),anchor=el('a');anchor.href=url;anchor.download='application-ledger.csv';document.body.append(anchor);anchor.click();anchor.remove();setTimeout(()=>URL.revokeObjectURL(url),1000);
+    note('Your complete application ledger was exported.');
+  }catch(error){note(error.message,true);}finally{button.disabled=false;}
+};
