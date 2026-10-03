@@ -15,6 +15,20 @@ from .util import private_dir,atomic_json
 MAX_BODY=21*1024*1024
 
 
+def _action_failure(error, discovery_only=False):
+    from .util import Blocked
+    if isinstance(error, Blocked) and error.reason == 'paused': return None
+    reason = error.reason.replace('_', ' ') if isinstance(error, Blocked) else {
+        'PermissionError': 'access to a required local file was denied',
+        'FileNotFoundError': 'a required local file was not found',
+        'OSError': 'a local file could not be opened or closed',
+        'RuntimeError': 'the worker could not start normally',
+        'ValueError': 'its settings or local records could not be read',
+    }.get(type(error).__name__, 'the worker encountered ' + type(error).__name__)
+    action = 'opportunity search' if discovery_only else 'application batch'
+    return f'Your last {action} stopped because {reason}. Review the recorded batch and setup checks before trying again.'
+
+
 def dashboard_url(root,port=8766):
     path=private_dir(root/'config')/'dashboard-token.json'
     if path.is_symlink():raise ValueError('Unsafe dashboard token')
@@ -27,7 +41,7 @@ def dashboard_url(root,port=8766):
 
 
 def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
-    token=token or (secrets.token_urlsafe(32) if demo else dashboard_url(root,port).split('#token=',1)[1]); state={'running':False,'mode':None,'lock':threading.Lock()}
+    token=token or (secrets.token_urlsafe(32) if demo else dashboard_url(root,port).split('#token=',1)[1]); state={'running':False,'mode':None,'error':None,'lock':threading.Lock()}
     assets=Path(__file__).parent/'static'
     def start_cycle(discovery_only=False):
         generation=None
@@ -39,19 +53,33 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
             if state['running']:raise ValueError('A dashboard-triggered run is already active')
             state['running']=True
             state['mode']='discovery' if discovery_only else 'live'
+            state['error']=None
         def run():
-            from .worker import cycle
-            worker=Store(root)
+            worker=None;failure=None
             try:
+                worker=Store(root)
                 if discovery_only:
                     from .opportunity_search import find_opportunities
                     find_opportunities(worker,repo,requested_generation=generation)
-                else:cycle(worker,repo)
-            except Exception as e:worker.event('dashboard_run_failed','worker',{'type':type(e).__name__,'message':str(e)[:500]})
+                else:
+                    from .worker import cycle
+                    cycle(worker,repo)
+            except Exception as e:
+                failure=_action_failure(e,discovery_only)
+                if worker is not None and failure is not None:
+                    try:worker.event('dashboard_run_failed','worker',{'type':type(e).__name__,'message':str(e)[:500]})
+                    except Exception:pass
             finally:
-                worker.close()
-                with state['lock']:state['running']=False;state['mode']=None
-        threading.Thread(target=run,daemon=True).start()
+                try:
+                    if worker is not None:worker.close()
+                except Exception as e:
+                    failure=failure or _action_failure(e,discovery_only)
+                finally:
+                    with state['lock']:state['running']=False;state['mode']=None;state['error']=failure
+        try:threading.Thread(target=run,name='hireme-dashboard-worker',daemon=True).start()
+        except Exception as e:
+            with state['lock']:state['running']=False;state['mode']=None;state['error']=_action_failure(e,discovery_only)
+            raise
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self,*args):pass  # URL capability and personal input must not enter access logs.
@@ -111,7 +139,7 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     snapshot['demo']=demo
                     from .recovery import worker_status
                     activity=worker_status(store)
-                    with state['lock']:local_running=state['running'];local_mode=state['mode']
+                    with state['lock']:local_running=state['running'];local_mode=state['mode'];local_error=state['error']
                     if local_running:activity={**activity,'running':True,'recovery_needed':False}
                     snapshot['worker_recovery']=activity
                     running_mode=local_mode
@@ -119,7 +147,7 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                         row=store.db.execute("SELECT detail FROM runs WHERE status='running' ORDER BY started DESC LIMIT 1").fetchone()
                         try:running_mode=json.loads(row['detail'] or '{}').get('mode') if row else None
                         except (TypeError,ValueError):pass
-                    return self.send(200,{**snapshot,'fact_labels':FACTS,'required':sorted(REQUIRED),'worker_running':activity['running'],'worker_mode':running_mode})
+                    return self.send(200,{**snapshot,'fact_labels':FACTS,'required':sorted(REQUIRED),'worker_running':activity['running'],'worker_mode':running_mode,'worker_error':local_error})
                 if path=='/api/jobs':
                     from .ledger import search_jobs
                     query=parse_qs(urlsplit(self.path).query)

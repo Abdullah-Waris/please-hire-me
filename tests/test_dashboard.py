@@ -4,6 +4,7 @@ import socket
 import time
 import urllib.error
 import urllib.request
+import pytest
 from hireme.server import serve
 from pathlib import Path
 
@@ -59,6 +60,70 @@ def launch_preparation_fixture(root, repo, port):
     launch(root, repo, port)
 
 
+def launch_worker_failure_fixture(root, repo, port, failure_mode):
+    import threading
+    from hireme import server, worker
+    original_store = server.Store; worker_calls = []; thread_calls = []
+    class CloseFailure:
+        def __init__(self, store): self.store = store
+        def __getattr__(self, key): return getattr(self.store, key)
+        def close(self):
+            self.store.close()
+            raise OSError('synthetic-private-error-detail')
+    def store_factory(path):
+        if threading.current_thread().name == 'hireme-dashboard-worker':
+            worker_calls.append(True)
+            if len(worker_calls) == 1 and failure_mode == 'initialize':
+                raise PermissionError('synthetic-private-error-detail')
+            store = original_store(path)
+            return CloseFailure(store) if len(worker_calls) == 1 and failure_mode == 'cleanup' else store
+        return original_store(path)
+    server.Store = store_factory
+    worker.cycle = lambda store, repo: store.event('fixture_dashboard_cycle', 'fixture', {})
+    if failure_mode == 'thread-start':
+        original_start = threading.Thread.start
+        def start(thread):
+            if thread.name == 'hireme-dashboard-worker':
+                thread_calls.append(True)
+                if len(thread_calls) == 1: raise RuntimeError('synthetic-private-error-detail')
+            return original_start(thread)
+        threading.Thread.start = start
+    launch(root, repo, port)
+
+
+@pytest.mark.parametrize('failure_mode', ['initialize', 'cleanup', 'thread-start'])
+def test_dashboard_worker_failure_is_visible_and_retryable(store, failure_mode):
+    from playwright.sync_api import sync_playwright, expect
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch_worker_failure_fixture, args=(str(store.root), str(Path.cwd()), port, failure_mode)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 320, 'height': 844}); errors = []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(base + '/#token=fixture-capability')
+            expect(page.locator('#run')).to_be_enabled(); page.locator('#run').click()
+            for _ in range(50):
+                page.evaluate('refresh()')
+                if page.locator('#worker-error').is_visible(): break
+                page.wait_for_timeout(20)
+            expect(page.locator('#worker-error')).to_contain_text('Your last application batch stopped')
+            expect(page.locator('#worker-error')).not_to_contain_text('synthetic-private-error-detail')
+            expect(page.locator('#run')).to_be_enabled()
+            assert not page.request.get(base + '/api/state', headers={'X-Hireme-Token': 'fixture-capability'}).json()['worker_running']
+            page.locator('#run').click(); page.evaluate('refresh()')
+            expect(page.locator('#worker-error')).to_be_hidden(); expect(page.locator('#run')).to_be_enabled()
+            assert store.db.execute("SELECT COUNT(*) FROM events WHERE kind='fixture_dashboard_cycle'").fetchone()[0] == (2 if failure_mode == 'cleanup' else 1)
+            assert not store.db.execute('SELECT * FROM applications').fetchone()
+            assert not store.db.execute('SELECT * FROM model_requests').fetchone()
+            assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            browser.close()
+    finally: process.terminate(); process.join(5)
+
+
 def test_dashboard_stops_preparation_without_resuming_submissions(store, job):
     from playwright.sync_api import sync_playwright, expect
     store.update_settings({'live_enabled': False})
@@ -78,6 +143,7 @@ def test_dashboard_stops_preparation_without_resuming_submissions(store, job):
             expect(page.locator('#pause')).to_be_enabled(); expect(page.locator('#run')).to_be_disabled()
             page.locator('#pause').click(); page.evaluate('refresh()')
             expect(page.locator('#worker-state')).to_have_text('Submissions paused')
+            expect(page.locator('#worker-error')).to_be_hidden()
             expect(page.locator('#pause')).to_have_text('Resume')
             assert not store.settings()['live_enabled']
             run = store.db.execute('SELECT * FROM runs').fetchone()
@@ -121,6 +187,7 @@ def test_find_opportunities_and_stop_without_enabling_submissions(tmp_path):
             store = Store(root)
             assert not store.settings()['live_enabled'] and not store.settings()['onboarding_complete']
             assert store.db.execute('SELECT status FROM runs').fetchone()[0] == 'paused'
+            expect(page.locator('#worker-error')).to_be_hidden()
             assert store.db.execute('SELECT COUNT(*) FROM applications').fetchone()[0] == 0
             (root / 'finish-search').touch()
             page.locator('#discover').click()

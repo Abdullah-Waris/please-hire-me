@@ -1865,6 +1865,9 @@ function render() {
     !state.settings.live_enabled ||
     state.missing_setup.length > 0;
   $("#recovery-banner").hidden = !state.worker_recovery?.recovery_needed;
+  $("#worker-error").hidden = !state.worker_error;
+  if ($("#worker-error").textContent !== (state.worker_error || ""))
+    $("#worker-error").textContent = state.worker_error || "";
   $("#recover-worker").disabled = state.demo || state.worker_running;
   $("#demo-banner").hidden = !state.demo;
   updateScheduleControls();
