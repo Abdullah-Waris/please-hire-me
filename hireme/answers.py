@@ -41,18 +41,18 @@ def field_key(label):
         if re.fullmatch(pattern,label): return key
     if re.search(r"(?:which|what).*(?:college|university|school).*(?:attend|enroll)|name of (?:your |the )?(?:college|university|school)",label):return 'school'
     if re.fullmatch(r"(?:current |pursuing |academic )?degree(?: type)?",label):return 'degree'
-    if re.search(r'when.*(?:expect|plan).*graduat|(?:expected|anticipated).*graduation',label):return 'graduation'
+    if re.search(r'when.*(?:expect|plan).*graduat|(?:expected|anticipated).*graduation|what year.*graduat',label):return 'graduation'
     if 'highest' in label and re.search(r'education|degree',label):return 'highest_completed_degree'
     if re.search(r'(?:will|do).*(?:require|need).*sponsor|(?:require|need).*employment visa',label):return 'needs_sponsorship'
     if re.search(r'(?:authorized|eligible|authorization).*(?:united states|u\.s\.|\bus\b)',label):return 'work_authorized_us'
-    if re.search(r'(?:open|willing|comfortable).*(?:in.person|on.site)',label):return 'onsite'
+    if re.search(r'(?:open|willing|comfortable).*(?:in.person|on.site)|^i understand that this position requires me to work on.site',label):return 'onsite'
     return None
 
 
 def category(label):
-    if re.search(r"why (?:do you want|are you interested|this (?:role|company))|what interests you|what (?:excites|motivates) you|why.{0,50}(?:work|join)|why.{0,30}(?:choose|chose)|(?:professional|career|short.term) goals",label,re.I):return "motivation"
+    if re.search(r"why (?:do you want|are you interested|this (?:role|company))|what interests you|what (?:excites|motivates) you|what excites you|why are you excited|what makes you (?:excited|interested)|why.{0,50}(?:work|join)|why.{0,30}(?:choose|chose)|(?:professional|career|short.term) goals",label,re.I):return "motivation"
     if re.search(r"(?:tell|describe|share).{0,25}(?:project|something you (?:built|created))",label,re.I):return "project"
-    if re.search(r"(?:tell us about yourself|summarize your (?:background|experience)|describe your (?:background|experience))",label,re.I):return "experience"
+    if re.search(r"(?:tell us about yourself|summarize your (?:background|experience)|describe your (?:background|experience)|describe your prior experience)",label,re.I):return "experience"
     return None
 
 
@@ -69,7 +69,7 @@ def _option_value(key, value, options):
     }
     if key=='graduation' and re.fullmatch(r'\d{4}-\d{2}',value):
         year,month=value.split('-');season='Spring' if 3<=int(month)<=5 else 'Summer' if 6<=int(month)<=8 else 'Fall' if 9<=int(month)<=11 else 'Winter'
-        seasonal=[x for x in options if normalize(x)==normalize(season+' '+year)]
+        seasonal=[x for x in options if normalize(x) in {normalize(season+' '+year),year}]
         if len(seasonal)==1:return seasonal[0]
     allowed={normalize(value)}|aliases.get(key,{}).get(normalize(value),set())
     if value in ('Yes','No'):
@@ -106,7 +106,7 @@ def _resume_internship(store, label):
 
 
 def _discovery_answer(label, options, context):
-    if not re.search(r'how (?:did|have).*hear|how did.*(?:find|learn)|where did.*(?:find|hear|learn)|how did.*connect with',label,re.I):return None
+    if not re.search(r'how (?:did|have).*hear|how did.*(?:find|learn)|where did.*(?:find|hear|learn)|how did.*connect with',label,re.I) and not (len(options)>=3 and sum(bool(re.search(r'linkedin|indeed|search engine|social media|news article',x,re.I)) for x in options)>=3 and all(x.casefold() in label.casefold() for x in options)):return None
     source=context.get('source','')
     if not source or source=='user':return None
     normal=lambda x:re.sub(r'[^a-z0-9]','',x.casefold())
@@ -142,7 +142,7 @@ def _context_preference(store, label, options, context):
         index=1 if 'second choice' in low else 0
         if len(scores)>index:
             value=scores[index][1];evidence={'skills_revision':facts['skills']['revision'],'rank':index+1}
-    elif re.search(r'(?:select|choose).*(?:location).*(?:work)|location.*(?:select|choose).*(?:work)',low):
+    elif re.search(r'(?:select|choose).*(?:location).*(?:work)|location.*(?:select|choose).*(?:work)|(?:office|location).*(?:prefer|work|based)|(?:prefer|work).*(?:office|location)|^san francisco hq',low):
         if facts.get('onsite',{}).get('value')=='Yes' and re.search(r'Berkeley|San Francisco|Bay Area',facts.get('location',{}).get('value',''),re.I):
             local=[x for x in options if re.search(r'San Francisco|Bay Area|Berkeley',x,re.I)]
             if len(local)==1:value=local[0];evidence={'location_revision':facts['location']['revision'],'onsite':'Yes'}
@@ -204,6 +204,22 @@ def _foreign_targets(store, template, context):
     return [name for name in targets if store.company(name) not in store.company(context.get('company',''))]
 
 
+def _resume_evidence(store):
+    """Read the applicant's uploaded resume, binding excerpts to its exact bytes."""
+    doc=store.db.execute("SELECT * FROM documents WHERE kind='resume'").fetchone()
+    if not doc:return None,''
+    from .util import safe_document
+    data=safe_document(store.root/'documents'/doc['filename'],store.root/'documents').read_bytes()
+    import hashlib
+    if hashlib.sha256(data).hexdigest()!=doc['hash']:raise Blocked('document_tampered')
+    if b'%%EOF' not in data:return doc['hash'],''
+    from pypdf import PdfReader
+    import io
+    try:text='\n'.join(page.extract_text() or '' for page in PdfReader(io.BytesIO(data)).pages)
+    except Exception:return doc['hash'],''
+    return doc['hash'],text
+
+
 def _approved_sentences(store, context):
     choices=[]
     for t in store.templates():
@@ -213,6 +229,12 @@ def _approved_sentences(store, context):
         for i,sentence in enumerate(re.split(r'(?<=[.!?])\s+(?=[A-Z])',t['body'])):
             if any(re.search(r'\b'+re.escape(name)+r'\b',sentence,re.I) for name in foreign):continue
             choices.append({'id':t['id']+':'+str(i),'text':sentence,'template_id':t['id'],'revision':t['revision']})
+    if store.settings()['tailored_writing']:
+        resume_hash,text=_resume_evidence(store)
+        for i,excerpt in enumerate(text.splitlines()):
+            excerpt=excerpt.strip()
+            if excerpt:
+                choices.append({'id':'resume:'+str(i),'text':excerpt,'resume_hash':resume_hash})
     # Keep inference cost bounded as an applicant adds a larger source library.
     if sum(len(x['text']) for x in choices)>24000:
         terms=set(re.findall(r'[a-z]{4,}',(context.get('title','')+' '+context.get('description','')).casefold()))
@@ -231,7 +253,13 @@ def _validate_writing(store, answer):
     if answer['provenance'].get('tailored'):
         if not store.settings()['tailored_writing'] or not parts or answer['provenance'].get('text_hash')!=digest(answer['value']):raise Blocked('unsupported_or_stale_sample')
     elif not parts or answer['value']!=' '.join(p['text'] for p in parts):raise Blocked('unsupported_or_stale_sample')
+    resume=None
     for part in parts:
+        if 'resume_hash' in part:
+            if not store.settings()['tailored_writing']:raise Blocked('unsupported_or_stale_sample')
+            if resume is None:resume=_resume_evidence(store)
+            if part['resume_hash']!=resume[0] or not part['text'] or part['text'] not in resume[1]:raise Blocked('unsupported_or_stale_sample')
+            continue
         source=templates.get(part['template_id'])
         if not source or source['revision']!=part['revision'] or part['text'] not in source['body']:raise Blocked('unsupported_or_stale_sample')
 
@@ -239,6 +267,7 @@ def _validate_writing(store, answer):
 def resolve(store, host, field, provider=None, context=None):
     label=field['label'];options=field.get('options',[]);context=dict(context or {})
     context['max_sentences']=_sentence_cap(field,context)
+    context['single_line']=field.get('type')=='text'
     from .materials import writing_context,writing_context_hash
     context.update(writing_context(store))
     if REFUSE.search(label):raise Blocked('human_work_sample',label)
@@ -246,6 +275,7 @@ def resolve(store, host, field, provider=None, context=None):
     if writing:
         try:
             _validate_writing(store,writing)
+            if context['single_line'] and re.search(r'[\r\n]',writing['value']):raise Blocked('writing_upgrade_needed')
             if store.settings()['tailored_writing'] and not writing['provenance'].get('tailored'):raise Blocked('writing_upgrade_needed')
             if writing['provenance'].get('tailored') and writing['provenance'].get('context_hash')!=writing_context_hash(store,context):raise Blocked('stale_writing_context')
             if not _fits_writing_limits(writing['value'],field,context):raise Blocked('answer_too_long',label)
@@ -275,12 +305,14 @@ def resolve(store, host, field, provider=None, context=None):
             key=binding['fact_key'] or key
             template=next((t for t in store.templates() if t['id']==binding['template_id']),None)
         cat=category(label) if field.get('type') in ('text','textarea') and not options else None
-        if cat and provider and store.settings()['tailored_writing'] and store.templates():
+        is_writing=not options and field.get('type') in ('text','textarea') and (cat or re.search(r'example|describe|tell us|why|what.*(?:interests|excites)|share.*(?:work|project)',label,re.I))
+        if is_writing and not key and provider and store.settings()['tailored_writing']:
             choices=_approved_sentences(store,context)
-            draft=provider.draft_answer(label,choices,context,field.get('maxlength',-1))
+            draft=provider.draft_answer(label,choices,context,field.get('maxlength',-1)) if choices else {}
             ids=draft.get('sentence_ids',[]);by_id={x['id']:x for x in choices}
             if draft.get('answer') and ids and all(x in by_id for x in ids):
                 parts=[{k:v for k,v in by_id[x].items() if k!='id'} for x in ids]
+                draft['answer']=re.sub(r'[\r\n]+', ' ', draft['answer']).strip() if context['single_line'] else draft['answer']
                 writing={'value':draft['answer'],'provenance':{'tailored':True,'sample_parts':parts,'text_hash':digest(draft['answer']),'context_hash':writing_context_hash(store,context)}}
                 _validate_writing(store,writing)
                 if not _fits_writing_limits(writing['value'],field,context):raise Blocked('answer_too_long',label)
@@ -307,7 +339,6 @@ def resolve(store, host, field, provider=None, context=None):
                     template=next((t for t in store.templates() if t['id']==tid),None)
                     if template:store.bind_field(host,label,options,template_id=tid)
         if template and (_foreign_targets(store,template,context) or not _fits_writing_limits(template['body'],field,context)):template=None
-        is_writing=not options and field.get('type') in ('text','textarea') and (cat or re.search(r'example|describe|tell us|why|what interests|share.*(?:work|project)',label,re.I))
         if not template and not key and not derived and provider and is_writing:
             choices=_approved_sentences(store,context)
             ids=provider.choose_sentences(label,choices,context,field.get('maxlength',-1)) if choices else []
@@ -320,7 +351,7 @@ def resolve(store, host, field, provider=None, context=None):
                 store.save_writing_answer(host,label,options,writing);store.resolve_known_question(host,label)
                 return {'field':field,**writing}
         if template:
-            value=template['body'];provenance={'template_id':template['id'],'revision':template['revision']}
+            value=re.sub(r'[\r\n]+',' ',template['body']).strip() if field.get('type')=='text' else template['body'];provenance={'template_id':template['id'],'revision':template['revision']}
         elif derived:
             value=derived['value'];provenance=derived['provenance']
         else:
@@ -332,7 +363,7 @@ def resolve(store, host, field, provider=None, context=None):
             value=fact['value']
             if key=='gpa' and field.get('type')=='number' and '/' in value:value=value.split('/',1)[0].strip()
             provenance={'fact_key':key,'revision':fact['revision']}
-    if field.get('type') in ('radio','select','combobox','checkbox') and options:
+    if field.get('type') in ('radio','select','combobox','checkbox','checkbox-group') and options:
         try:value=_option_value(key,value,options)
         except Blocked:raise Blocked('option_mismatch',label)
     if field.get('maxlength',-1)>0 and len(value)>field['maxlength']:raise Blocked('answer_too_long',label)
@@ -360,7 +391,7 @@ def validate_package(store, job, package):
             continue
         if "template_id" in prov:
             template=next((x for x in store.templates() if x["id"]==prov["template_id"]),None)
-            if not template or _foreign_targets(store,template,job) or (template["category"]!=category(field["label"]) and not ((store.field_binding(job.get("answer_scope",job["host"]),field["label"],field.get("options",[])) or {}).get("template_id")==template["id"])) or template["revision"]!=prov["revision"] or template["body"]!=answer["value"]:
+            if not template or _foreign_targets(store,template,job) or (template["category"]!=category(field["label"]) and not ((store.field_binding(job.get("answer_scope",job["host"]),field["label"],field.get("options",[])) or {}).get("template_id")==template["id"])) or template["revision"]!=prov["revision"] or (re.sub(r"[\r\n]+"," ",template["body"]).strip() if field.get("type")=="text" else template["body"])!=answer["value"]:
                 raise Blocked("unsupported_or_stale_template")
             continue
         expected=resolve(store,job.get("answer_scope",job["host"]),field,context=job)

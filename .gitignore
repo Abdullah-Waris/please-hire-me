@@ -66,3 +66,6 @@ venv/
 .impeccable/
 output/
 tmp/
+
+# OAuth client credentials downloaded from provider consoles
+client_secret*.json

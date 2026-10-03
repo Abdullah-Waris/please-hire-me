@@ -181,3 +181,5 @@ Tests use synthetic local ATS/mail fixtures. They cover provenance, revisions, s
 MIT. Original source attribution is preserved in [LICENSE](LICENSE). Never commit personal files or credentials.
 
 See the [documentation map](docs/README.md) for the source layout, current references, and archived material.
+
+On each eligible job row, **Applied manually** records your own application and **Don’t apply** excludes only that posting. Both survive discovery and stop automatic retries; **Undo** returns the posting to the queue. Manual applications count toward company limits and cooldowns but remain separate from worker-confirmed submissions. Pending questions are hidden while a posting is excluded. Jobs with confirmed or uncertain submission records use their existing outcome/reconciliation flow.

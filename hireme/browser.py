@@ -31,7 +31,7 @@ SNAPSHOT=r"""selector => {
   const direct=Array.from(el.labels||[]).map(labelText).join(' ').trim();
   const field=el.closest('fieldset'); const legend=field?.querySelector('legend')?.innerText;
   const wrapper=el.closest('[class*=form-field],[class*=field-entry],[class*=application-question],.field');
-  return (el.getAttribute('aria-label')||aria||direct||legend||labelText(wrapper?.querySelector('label'))||el.getAttribute('placeholder')||'').trim();
+  return (el.getAttribute('description')||el.getAttribute('aria-label')||aria||direct||legend||labelText(wrapper?.querySelector('label'))||el.getAttribute('placeholder')||'').trim();
  }
  controls.forEach((el,index)=>{
   if(!el.getClientRects().length && el.type!=='file')return;
@@ -47,12 +47,14 @@ SNAPSHOT=r"""selector => {
    else if(/resume|\bcv\b/.test(identity))question='Resume/CV';
    else if(/cover.?letter/.test(identity))question='Cover letter';
   }
-  if(type==='radio'){
+  const checkboxGroup=type==='checkbox' && el.name && el.getAttribute('description') && controls.filter(x=>x.type==='checkbox'&&x.name===el.name&&x.getAttribute('description')===el.getAttribute('description')).length>1;
+  if(type==='radio'||checkboxGroup){
    const name=el.name; if(!name||seen.has(name))return;seen.add(name);
-   const group=controls.filter(x=>x.type==='radio'&&x.name===name);
+   const group=controls.filter(x=>x.type===el.type&&x.name===name);
+   if(checkboxGroup)type='checkbox-group';
    indices=group.map(x=>controls.indexOf(x)); options=group.map(x=>Array.from(x.labels||[]).map(l=>l.innerText).join(' ').trim()||x.value);
-   const parent=el.closest('fieldset'); question=parent?.querySelector('legend')?.innerText||el.closest('[class*=field],[class*=question]')?.querySelector('label')?.innerText||question;
-   value=group.find(x=>x.checked)?.value||'';
+   const parent=el.closest('fieldset'); question=el.getAttribute('description')||parent?.querySelector('legend')?.innerText||el.closest('[class*=field],[class*=question]')?.querySelector('label')?.innerText||question;
+   value=group.filter(x=>x.checked).map(x=>Array.from(x.labels||[]).map(l=>l.innerText).join(' ').trim()||x.value).join('; ');
   }else if(type==='select'){options=Array.from(el.options).filter(o=>o.value&&!o.disabled).map(o=>o.textContent.trim())}
   else if(type==='checkbox'){options=['Yes','No'];value=el.checked?'Yes':'No'}
   out.push({index,indices,ref:reference(el),refs:indices.map(i=>reference(controls[i])),label:question.replace(/\s+/g,' ').trim(),type,options,
@@ -67,7 +69,7 @@ LOGIN=re.compile(r"sign in to (?:apply|continue)|log in to (?:apply|continue)|cr
 class Browser:
     def __init__(self,store,test_url=None):
         self.store=store; self.test_url=test_url; self.context=None; self.playwright=None
-        self.page=None; self.aid=None; self.attempted=False; self.current_host=""; self.host_cache={}; self.denied_write=False; self.upload_payloads={}; self.uploaded_files=set()
+        self.page=None; self.aid=None; self.attempted=False; self.current_host=""; self.host_cache={}; self.denied_write=False; self.denied_request=None; self.upload_payloads={}; self.uploaded_files=set()
         self.auth_write=None
 
     def __enter__(self):
@@ -151,7 +153,7 @@ class Browser:
             if host not in allowed:return route.abort()
             if not self.attempted and host not in {"www.google.com","www.recaptcha.net","recaptcha.google.com"}:
                 payload=route.request.post_data or ""
-                reading=False
+                reading=False;data=None
                 try:
                     data=json.loads(payload)
                     queries=data if isinstance(data,list) else [data]
@@ -162,7 +164,21 @@ class Browser:
                 passive_check=p.path.startswith("/cdn-cgi/challenge-platform/")
                 uploading=bool(re.search(r'/(?:upload|uploads|files|attachments|documents)(?:/|\?|$)',p.path,re.I))
                 if not reading and not uploading and not passive_check:
-                    self.denied_write=True
+                    # Ashby autosaves even untouched/null fields on form hydration.
+                    # Suppress the save without treating it as a submission attempt;
+                    # local control values are still verified before final submit.
+                    autosave=(host==self.current_host=='jobs.ashbyhq.com'
+                              and p.path=='/api/non-user-graphql'
+                              and isinstance(data,dict)
+                              and data.get('operationName')=='ApiSetFormValue'
+                              and isinstance(data.get('query'),str)
+                              and re.match(r'^\s*mutation\s+ApiSetFormValue\b',data['query']))
+                    detail={'host':host,'path':p.path,'method':route.request.method}
+                    if autosave:
+                        self.store.event('draft_autosave_suppressed',None,detail)
+                    else:
+                        self.denied_write=True;self.denied_request=detail
+                        self.store.event('request_blocked',None,detail)
                     return route.abort()
         return route.continue_()
 
@@ -184,7 +200,7 @@ class Browser:
 
     def _guard(self,job,allow_verification=False):
         if not self.attempted:self.store.checkpoint()
-        if self.denied_write:raise Blocked("unapproved_draft_write","An unsupported page attempted to save data before submit authorization")
+        if self.denied_write:raise Blocked("unapproved_draft_write","Unrecognized pre-submit request blocked: "+json.dumps(self.denied_request or {},sort_keys=True))
         url=self.page.url; host=urlsplit(url).hostname
         if self.test_url and url.startswith(self.test_url):pass
         elif host!=self.current_host:
@@ -334,6 +350,8 @@ class Browser:
         el=self._control(f)
         if f['type']=='select':el.select_option(label=value)
         elif f['type']=='radio':self._control(f,f['options'].index(value)).check()
+        elif f['type']=='checkbox-group':
+            for i,option in enumerate(f['options']):self._control(f,i).set_checked(option==value)
         elif f['type']=='checkbox':el.set_checked(value=='Yes')
         elif f['type']=='combobox':
             el.click()
@@ -356,6 +374,8 @@ class Browser:
             if f['type']=='select':actual=el.locator('option:checked').inner_text().strip()
             elif f['type']=='radio':
                 actual=next((f['options'][i] for i,index in enumerate(f['indices']) if self._control(f,i).is_checked()),'')
+            elif f['type']=='checkbox-group':
+                actual='; '.join(f['options'][i] for i in range(len(f['indices'])) if self._control(f,i).is_checked())
             elif f['type']=='checkbox':actual='Yes' if el.is_checked() else 'No'
             elif f['type']=='combobox':actual=next((x['value'] for x in fresh if x['label']==f['label'] and x['type']=='combobox'),'')
             else:actual=el.input_value()
@@ -368,10 +388,18 @@ class Browser:
             sizes=el.evaluate('(e)=>Array.from(e.files||[]).map(f=>f.size)')
             expected=safe_document(self.store.root/'documents'/d['filename'],self.store.root/'documents').stat().st_size
             if sizes!=[expected] and not (d['hash'] in self.uploaded_files and d['filename'] in self.page.locator('body').inner_text()):raise Blocked('upload_verification_failed')
-        if self.page.locator('[aria-invalid=true]').count() or not self.page.evaluate('() => Array.from(document.forms).every(f=>f.checkValidity())'):raise Blocked('invalid_fields')
+        if self.page.locator('[aria-invalid=true]').count() or not self.page.evaluate('''() => Array.from(document.forms).every(f=>Array.from(f.elements).every(e=>{
+            if(e.type==='checkbox' && e.name && e.getAttribute('description')){
+                const group=Array.from(f.elements).filter(x=>x.type==='checkbox'&&x.name===e.name&&x.getAttribute('description')===e.getAttribute('description'));
+                // Greenhouse marks each option required, but requires a group answer.
+                if(group.length>1)return !group.some(x=>x.required)||group.some(x=>x.checked);
+            }
+            return !e.checkValidity||e.checkValidity();
+        }))'''):raise Blocked('invalid_fields')
 
     def apply(self,job,live=True):
-        self.aid=None; self.attempted=False; self.denied_write=False; self.upload_payloads={}; self.uploaded_files=set();self.auth_write=None
+        self.aid=None; self.attempted=False; self.denied_write=False; self.denied_request=None; self.upload_payloads={}; self.uploaded_files=set();self.auth_write=None
+        self.store.check_job_decision(job['id'])
         self.current_host=job['host']
         if self.test_url:self.current_host=urlsplit(self.test_url).hostname
         elif job['host'] not in ATS_HOSTS|PORTAL_HOSTS:raise Blocked('unapproved_destination')
@@ -426,7 +454,7 @@ class Browser:
                 try:
                     from .provider import LazyProvider
                     provider=LazyProvider(self.store.settings()['model_timeout_seconds'],store=self.store,checkpoint=self.store.checkpoint,observer=lambda stage,detail:self.store.event(stage,job['id'],detail))
-                    a=resolve(self.store,job['answer_scope'],f,provider,context={**job,'form_questions':[x['label'] for x in fields],'previous_templates':[x['provenance']['template_id'] for x in answers if 'template_id' in x['provenance']]})
+                    a=resolve(self.store,job['answer_scope'],f,provider,context={**job,'form_questions':[x['label'] for x in fields],'previous_templates':[x['provenance']['template_id'] for x in answers if 'template_id' in x['provenance']], 'previous_writing':[{'question':x['field']['label'],'answer':x['value']} for x in answers if 'sample_parts' in x['provenance'] or 'template_id' in x['provenance']]})
                     if a:
                         answers.append(a)
                         self.store.event('field_answered',job['id'],{'label':f['label'],'value':a['value'],'provenance':a['provenance']})

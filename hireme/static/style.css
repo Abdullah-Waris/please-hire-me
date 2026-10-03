@@ -5,3 +5,5 @@
 .material-review{display:grid;gap:16px;max-width:760px}.material-review>label:not(.confirmation){display:flex;flex-direction:column;gap:6px;font-size:14px;font-weight:600}.material-review>button{justify-self:start}.material-review .help{margin:0}.material-review .confirmation{margin:0}
 
 pre{max-width:100%;overflow-x:auto;padding:14px;background:var(--surface);border:1px solid var(--rule);font-size:14px}
+
+.job-actions{display:flex;flex-wrap:wrap;gap:8px;margin-top:8px}

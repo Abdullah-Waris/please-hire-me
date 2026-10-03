@@ -50,6 +50,8 @@ CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, company TEXT NOT NULL, com
  title TEXT NOT NULL, url TEXT UNIQUE NOT NULL, host TEXT NOT NULL, source TEXT NOT NULL,
  payload TEXT NOT NULL, score INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'discovered',
  reason TEXT NOT NULL DEFAULT '', first_seen TEXT NOT NULL, updated TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS job_decisions (job_id TEXT PRIMARY KEY, decision TEXT NOT NULL,
+ previous_status TEXT NOT NULL, created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS applications (id TEXT PRIMARY KEY, job_id TEXT NOT NULL UNIQUE,
  company_key TEXT NOT NULL, state TEXT NOT NULL, package TEXT NOT NULL, hash TEXT NOT NULL,
  created TEXT NOT NULL, updated TEXT NOT NULL, attempted TEXT, confirmation TEXT, screenshot TEXT);
@@ -257,15 +259,43 @@ class Store:
         aliases={company_key(k):company_key(v) for k,v in s["company_aliases"].items()}
         return aliases.get(n,n)
 
+    def decide_job(self, jid, decision):
+        if decision not in ('manually_applied','skipped','undo'):
+            raise ValueError('Choose applied manually, do not apply, or undo')
+        with self.transaction():
+            job=self.db.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone()
+            if not job:raise ValueError('Job not found')
+            app=self.db.execute('SELECT state FROM applications WHERE job_id=?',(jid,)).fetchone()
+            if app and app[0] in ('submitting','unknown','awaiting_verification','confirmed'):
+                raise ValueError('This application already has a submission record; reconcile uncertain outcomes first')
+            previous=self.db.execute('SELECT * FROM job_decisions WHERE job_id=?',(jid,)).fetchone()
+            if decision=='undo':
+                if not previous:raise ValueError('No manual decision to undo')
+                self.db.execute('DELETE FROM job_decisions WHERE job_id=?',(jid,))
+                self.db.execute("UPDATE jobs SET status='discovered',reason='',updated=? WHERE id=?",(now(),jid))
+            else:
+                self.db.execute("INSERT INTO job_decisions VALUES(?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET decision=excluded.decision,created=excluded.created",
+                    (jid,decision,job['status'],now()))
+                self.db.execute("UPDATE jobs SET status=?,reason='',updated=? WHERE id=?",(decision,now(),jid))
+            self.event('job_decision',jid,{'decision':decision})
+
+    def check_job_decision(self, jid):
+        decision=self.db.execute('SELECT decision FROM job_decisions WHERE job_id=?',(jid,)).fetchone()
+        if decision:raise Blocked(decision[0])
+
     def block(self, jid, reason, detail=""):
-        self.db.execute("UPDATE jobs SET status='blocked',reason=?,updated=? WHERE id=?",(reason + (": " + detail if detail else ""),now(),jid))
+        self.db.execute("UPDATE jobs SET status='blocked',reason=?,updated=? WHERE id=? AND id NOT IN (SELECT job_id FROM job_decisions)",(reason + (": " + detail if detail else ""),now(),jid))
         self.event("blocked",jid,{"reason":reason,"detail":detail})
 
     def _check_budget(self, job, s):
+        self.check_job_decision(job["id"])
         ck=self.company(job["company"])
         if ck in {self.company(x) for x in s["skip_companies"]+s["interview_companies"]}:
             raise Blocked("company_blocked")
         active = list(self.db.execute("SELECT * FROM applications WHERE company_key=? AND state IN ('submitting','unknown','confirmed','awaiting_verification')",(ck,)))
+        manual=[{'state':'manually_applied','created':r['created'],'attempted':r['created'],'company_key':self.company(r['company'])}
+                for r in self.db.execute("SELECT d.created,j.company FROM job_decisions d JOIN jobs j ON j.id=d.job_id WHERE d.decision='manually_applied'")]
+        active.extend(r for r in manual if r['company_key']==ck)
         if any(r["state"]=="awaiting_verification" for r in active):
             raise Blocked("company_verification_pending","Complete the earlier application verification first")
         if any(r["state"] in ("submitting","unknown") for r in active):
@@ -274,6 +304,7 @@ class Store:
             raise Blocked("company_limit")
         local_day=datetime.now(ZoneInfo(s["timezone"])).date()
         all_active=list(self.db.execute("SELECT * FROM applications WHERE state IN ('submitting','unknown','confirmed','awaiting_verification')"))
+        all_active.extend(manual)
         daily=[r for r in all_active if datetime.fromisoformat(r["attempted"] or r["created"]).astimezone(ZoneInfo(s["timezone"])).date()==local_day]
         if len(daily)>=s["max_per_day"]:
             raise Blocked("daily_limit")
@@ -377,7 +408,7 @@ class Store:
         return {"settings":self.settings(),"templates":self.templates(),"facts":self.facts(False),"missing_setup":self.missing_setup(),
                 "jobs":rows("SELECT * FROM jobs ORDER BY score DESC,first_seen DESC LIMIT 500"),
                 "applications":rows("SELECT * FROM applications ORDER BY created DESC LIMIT 500"),
-                "questions":rows("SELECT * FROM questions WHERE resolved=0 ORDER BY rowid"),
+                "questions":rows("SELECT * FROM questions WHERE resolved=0 AND job_id NOT IN (SELECT job_id FROM job_decisions) ORDER BY rowid"),
                 "runs":rows("SELECT * FROM runs ORDER BY started DESC LIMIT 30"),
                 "sources":rows("SELECT * FROM sources ORDER BY checked DESC LIMIT 100"),
                 "employer_accounts":rows("SELECT * FROM employer_accounts ORDER BY updated DESC LIMIT 100"),

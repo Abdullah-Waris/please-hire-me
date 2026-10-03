@@ -30,7 +30,7 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,
                 store.checkpoint(); sweep_lists(store)
                 store.checkpoint(); sweep_portals(store)
                 store.checkpoint(); sweep_boards(store,repo)
-            rows=list(store.db.execute("SELECT * FROM jobs WHERE status IN ('discovered','blocked','prepared') ORDER BY score DESC,first_seen DESC"))
+            rows=list(store.db.execute("SELECT * FROM jobs WHERE status IN ('discovered','blocked','prepared') AND id NOT IN (SELECT job_id FROM job_decisions) ORDER BY score DESC,first_seen DESC"))
             ranked=[]
             for row in rows:
                 store.checkpoint()
@@ -56,12 +56,13 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,
                             if count>=target or (max_attempts is not None and attempts>=max_attempts) or time.monotonic()-start>s['cycle_timeout_seconds']:break
                             store.checkpoint()
                             try:
+                                store.check_job_decision(job['id'])
                                 attempts+=1
                                 store.event('application_started',job['id'],{'run_id':rid,'attempt':attempts,'company':job['company'],'title':job['title']})
                                 outcome=browser.apply(job,live=live)
                                 outcomes[outcome]=outcomes.get(outcome,0)+1
                                 store.event('application_finished',job['id'],{'run_id':rid,'outcome':outcome})
-                                store.db.execute('UPDATE jobs SET status=? WHERE id=?',(outcome,job['id']))
+                                store.db.execute('UPDATE jobs SET status=? WHERE id=? AND id NOT IN (SELECT job_id FROM job_decisions)',(outcome,job['id']))
                                 if outcome=='confirmed' or not live and outcome=='prepared':count+=1
                             except Blocked as e:
                                 if e.reason in ('paused','model_budget_exhausted','provider_rate_limited'):raise

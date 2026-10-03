@@ -402,3 +402,63 @@ def test_model_budget_and_rate_limit_stop_before_employer_write(store,ats,monkey
         with pytest.raises(Blocked,match=reason):browser.apply(local_job(store,ats))
     assert not ats[1]
     assert not store.db.execute('SELECT 1 FROM questions').fetchone()
+
+
+def test_ashby_autosave_is_suppressed_without_blocking_local_form(store,monkeypatch):
+    monkeypatch.setattr('hireme.browser.public_host',lambda host:True)
+    b=Browser(store);b.current_host='jobs.ashbyhq.com'
+    class Request:
+        url='https://jobs.ashbyhq.com/api/non-user-graphql?op=ApiSetFormValue'
+        method='POST'
+        post_data=json.dumps({'operationName':'ApiSetFormValue','query':'mutation ApiSetFormValue { setFormValue { id } }'})
+    class Route:
+        request=Request()
+        action=None
+        def abort(self):self.action='abort'
+        def continue_(self):self.action='continue'
+    r=Route();b._route(r)
+    assert r.action=='abort' and not b.denied_write
+    r.request.post_data=json.dumps({'operationName':'SubmitApplication','query':'mutation SubmitApplication { submitApplication { id } }'})
+    b._route(r)
+    assert r.action=='abort' and b.denied_write
+    assert b.denied_request=={'host':'jobs.ashbyhq.com','path':'/api/non-user-graphql','method':'POST'}
+
+
+def test_ashby_hydration_autosave_does_not_prevent_preparing_form(store,monkeypatch):
+    monkeypatch.setattr('hireme.browser.public_host',lambda host:True)
+    url='https://jobs.ashbyhq.com/acme/synthetic-req/application'
+    job={'id':__import__('hireme.util',fromlist=['digest']).digest(url),'url':url,
+         'host':'jobs.ashbyhq.com','company':'Acme','title':'Software Engineer Intern Summer 2027',
+         'location':'San Francisco, United States','description':'Build Python software.','source':'ash:synthetic'}
+    store.upsert_job(job)
+    html=(Path(__file__).parent/'fixtures/application.html').read_text()
+    html=html.replace('</body>', '''<script>
+      fetch('/api/non-user-graphql?op=ApiSetFormValue', {method:'POST',
+        body:JSON.stringify({operationName:'ApiSetFormValue',
+          query:'mutation ApiSetFormValue { setFormValue { id } }',variables:{value:null}})
+      }).catch(()=>{});
+      </script></body>''')
+    with Browser(store) as b:
+        def serve(route):
+            if route.request.method=='GET':route.fulfill(status=200,content_type='text/html',body=html)
+            else:b._route(route)
+        b.page.route('**/*',serve)
+        assert b.apply(job,live=False)=='prepared'
+        assert not b.denied_write
+    assert store.db.execute("SELECT count(*) FROM events WHERE kind='draft_autosave_suppressed'").fetchone()[0]>=1
+
+
+def test_greenhouse_checkbox_choices_keep_question_and_choose_only_one(store,ats):
+    job=local_job(store,ats)
+    original=(Path(__file__).parent/'fixtures/application.html').read_text()
+    html=original.replace('</form>', '''<div>
+    <label><input type="checkbox" name="authorization[]" required id="auth-yes" description="Are you currently authorized to work in the United States?" value="1">Yes</label>
+    <label><input type="checkbox" name="authorization[]" required id="auth-no" description="Are you currently authorized to work in the United States?" value="2">No</label>
+    </div></form>''')
+    with Browser(store,test_url=ats[0]) as b:
+        b.page.route(ats[0]+'/**',lambda route:route.fulfill(status=200,content_type='text/html',body=html) if route.request.method=='GET' else route.fallback())
+        assert b.apply(job,live=False)=='prepared'
+        assert b.page.locator('#auth-yes').is_checked()
+        assert not b.page.locator('#auth-no').is_checked()
+        groups=[f for f in b._snapshot() if f['type']=='checkbox-group']
+        assert len(groups)==1 and groups[0]['value']=='Yes'
