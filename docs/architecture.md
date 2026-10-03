@@ -34,6 +34,8 @@ Single-page forms with native controls and inspectable custom comboboxes are sup
 
 Gmail OAuth is optional, owner-bound and outside model input. Provider adapters support explicit subscription CLI or paid API choices. Every managed inference reserves a durable request before dispatch; failed calls also consume budget. No inherited API key is used. Native employer account creation, arbitrary post-run hooks, clipboard brokers and personal-browser attachment are unsupported.
 
+`accounts.py` supplies internal prerequisites for future account adapters: employer-scoped private credential files and durable creation intents. It performs no network actions and is not connected to the worker or dashboard. Crash recovery holds uncertain account writes, and portable restores exclude credentials. Password files have mode 0600 and rely on local OS security; they are not encrypted.
+
 ## Release validation
 
 Run the full local suite and browser fixture tests, inspect the diff, and verify dashboard desktop/mobile. Actual employer acceptance, live portal sessions, scheduling while asleep and sustained daily throughput require independent operational evidence. Do not label them verified from local tests.

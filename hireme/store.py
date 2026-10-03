@@ -14,6 +14,8 @@ from .config import DEFAULTS, REQUIRED, validate_fact, validate_settings
 from .util import Blocked, atomic_json, company_key, digest, now, private_dir
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS employer_accounts (id TEXT PRIMARY KEY, origin TEXT NOT NULL,
+ company TEXT NOT NULL, state TEXT NOT NULL, updated TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS model_requests (id INTEGER PRIMARY KEY, timestamp TEXT NOT NULL, run_id TEXT NOT NULL, provider TEXT NOT NULL);
 CREATE INDEX IF NOT EXISTS model_requests_time ON model_requests(timestamp);
 CREATE INDEX IF NOT EXISTS model_requests_run ON model_requests(run_id);
@@ -346,6 +348,7 @@ class Store:
 
     def recover(self):
         with self.transaction():
+            self.db.execute("UPDATE employer_accounts SET state='uncertain',updated=? WHERE state='creating'",(now(),))
             rows=list(self.db.execute("SELECT id,job_id FROM applications WHERE state='submitting'"))
             for r in rows:
                 self.db.execute("UPDATE applications SET state='unknown',updated=? WHERE id=?",(now(),r[0]))
