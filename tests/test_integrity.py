@@ -9,6 +9,17 @@ from hireme.store import Store,worker_lock
 from hireme.config import validate_settings,validate_fact
 
 
+def test_retry_requires_reconciled_no_submission_and_preserves_attempt(store,job,package):
+    aid=store.prepare(job,package);store.begin_submit(aid);store.finish(aid,'unknown')
+    with pytest.raises(ValueError):store.retry_not_submitted(aid,'Please retry this application')
+    store.reconcile(aid,False,'Expired verification challenge; final application not submitted')
+    assert store.retry_not_submitted(aid,'User requested a fresh verification code')==job['id']
+    assert not store.db.execute('SELECT * FROM applications WHERE id=?',(aid,)).fetchone()
+    event=store.db.execute("SELECT detail FROM events WHERE kind='application_retry_requested'").fetchone()[0]
+    assert json.loads(event)['previous_application']['attempted']
+    assert store.prepare(job,package)
+
+
 def test_no_generated_facts(store,job,package):
     package['answers'][0]['value']='invented@candidate.invalid'
     with pytest.raises(Blocked):store.prepare(job,package)

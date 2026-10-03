@@ -402,6 +402,19 @@ class Store:
             self.event("human_reconciliation",aid,{"submitted":submitted,"note":note})
         # A not-submitted outcome is deliberately not retried automatically.
 
+    def retry_not_submitted(self, aid, note):
+        if not isinstance(note,str) or len(note.strip())<10:raise ValueError('Explain why this application can be retried')
+        with self.transaction():
+            app=self.db.execute('SELECT * FROM applications WHERE id=?',(aid,)).fetchone()
+            if not app or app['state']!='not_submitted':raise ValueError('Reconcile as not submitted before retrying')
+            self.check_job_decision(app['job_id'])
+            # Preserve the entire prior attempt before freeing the unique job slot.
+            self.event('application_retry_requested',aid,{'previous_application':dict(app),'note':note})
+            self.db.execute('DELETE FROM verification_challenges WHERE application_id=?',(aid,))
+            self.db.execute('DELETE FROM applications WHERE id=?',(aid,))
+            self.db.execute("UPDATE jobs SET status='discovered',reason='',updated=? WHERE id=?",(now(),app['job_id']))
+            return app['job_id']
+
     def snapshot(self,material_offset=0):
         if type(material_offset) is not int or not 0<=material_offset<=1000000:raise ValueError("Invalid material page")
         def rows(q): return [dict(x) for x in self.db.execute(q)]

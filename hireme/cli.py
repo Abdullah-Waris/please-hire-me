@@ -37,6 +37,7 @@ def main(argv=None):
     p=sub.add_parser('import-tracker');p.add_argument('path',type=Path)
     sub.add_parser('status')
     sub.add_parser('pause');sub.add_parser('resume')
+    p=sub.add_parser('retry-not-submitted');p.add_argument('application_id');p.add_argument('--note',required=True)
     p=sub.add_parser('login');p.add_argument('url')
     p=sub.add_parser('import-legacy');p.add_argument('path',type=Path,default=REPO,nargs='?')
     args=parser.parse_args(argv)
@@ -141,6 +142,7 @@ def main(argv=None):
         elif args.command=='status':
             print(json.dumps({'missing_setup':store.missing_setup(),'settings':store.settings(),'runs':store.snapshot()['runs']},indent=2))
         elif args.command in ('pause','resume'):store.update_settings({'live_enabled':args.command=='resume'});print(args.command)
+        elif args.command=='retry-not-submitted':print(json.dumps({'job_id':store.retry_not_submitted(args.application_id,args.note)}))
         elif args.command=='login':
             from .discovery import ATS_HOSTS,PORTAL_HOSTS
             from .util import canonical_url,public_host
