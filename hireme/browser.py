@@ -451,6 +451,8 @@ class Browser:
                 actual=re.sub(r'[^0-9]','',actual);value=re.sub(r'[^0-9]','',value)
             if actual!=value:raise Blocked('field_verification_failed',f['label'])
         for d in documents:
+            if self.current_host in {'boards.greenhouse.io','job-boards.greenhouse.io','boards.eu.greenhouse.io','job-boards.eu.greenhouse.io'} and d['hash'] not in self.uploaded_files:
+                raise Blocked('upload_verification_failed','Greenhouse has not acknowledged the approved PDF upload')
             if self.current_host=='jobs.ashbyhq.com' and (d['hash'] not in self.uploaded_files or d['hash'] not in self.ashby_attached_files):
                 raise Blocked('upload_verification_failed','The approved PDF did not receive a successful upload response')
             if d['hash'] in self.uploaded_files and d['filename'] in body:continue
@@ -544,6 +546,10 @@ class Browser:
                 self._control(d['field']).set_input_files(str(path))
             if documents:
                 with contextlib.suppress(Exception):self.page.wait_for_load_state('networkidle',timeout=8000)
+                if self.current_host in {'jobs.ashbyhq.com','boards.greenhouse.io','job-boards.greenhouse.io','boards.eu.greenhouse.io','job-boards.eu.greenhouse.io'}:
+                    deadline=time.monotonic()+20
+                    while any(d['hash'] not in self.uploaded_files for d in documents) and time.monotonic()<deadline:
+                        self.store.checkpoint();self.page.wait_for_timeout(250)
             for a in answers:
                 self.store.checkpoint()
                 self.store.event('field_filling',job['id'],{'label':a['field']['label']})

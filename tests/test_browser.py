@@ -599,3 +599,13 @@ def test_explicit_ats_spam_rejection_is_not_uncertain_or_retried(store,ats):
         with pytest.raises(Blocked):b.apply(job)
     app=store.db.execute('SELECT state,confirmation FROM applications').fetchone()
     assert app['state']=='not_submitted' and 'possible spam' in app['confirmation']
+
+
+def test_greenhouse_filename_alone_does_not_prove_upload(store,ats):
+    with Browser(store,test_url=ats[0]) as b:
+        b.current_host='job-boards.greenhouse.io'
+        b.page.set_content('<label for="resume">Resume/CV*</label><input id="resume" type="file"><p>approved.pdf</p>')
+        fields=b._snapshot();documents=[{'field':fields[0],'hash':'approved','filename':'approved.pdf'}]
+        with pytest.raises(Blocked,match='Greenhouse has not acknowledged'):b._verify([],documents,fields)
+        b.uploaded_files.add('approved')
+        b._verify([],documents,fields)
