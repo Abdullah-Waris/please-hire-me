@@ -1089,7 +1089,7 @@ def test_demo_is_read_only_and_export_requires_auth(tmp_path):
         except urllib.error.HTTPError as error: assert error.code == 403
         try: urllib.request.urlopen(base + '/api/diagnostics'); assert False
         except urllib.error.HTTPError as error: assert error.code == 403
-        for endpoint in ('pause', 'resume-worker', 'run', 'discover', 'facts', 'settings', 'complete-setup', 'backup', 'recover', 'answer-revoke', 'schedule-apply', 'company-skip', 'company-allow', 'account-vault-export', 'account-vault-import', 'backup-check'):
+        for endpoint in ('pause', 'resume-worker', 'run', 'discover', 'facts', 'settings', 'complete-setup', 'backup', 'recover', 'answer-revoke', 'schedule-apply', 'company-skip', 'company-allow', 'account-vault-export', 'account-vault-import', 'backup-check', 'posting-import-preview', 'posting-import'):
             request = urllib.request.Request(base + '/api/' + endpoint, data=b'{}', headers={'X-Hireme-Token': 'fixture-capability'})
             try: urllib.request.urlopen(request); assert False
             except urllib.error.HTTPError as error:
@@ -2010,4 +2010,61 @@ def test_backup_check_browser_retry_isolation_and_authentication(store, tmp_path
             browser.close()
         assert store.snapshot() == before and store.settings()['live_enabled']
         assert not list(store.root.glob('.backup-check-*'))
+    finally: process.terminate(); process.join(5)
+
+
+def test_posting_csv_browser_previews_retries_and_keeps_attempt_history(store, job, package):
+    from playwright.sync_api import sync_playwright, expect
+    from tests.test_posting_import import csv_data
+    aid = store.prepare(job, package); store.begin_submit(aid); store.finish(aid, 'unknown')
+    data = csv_data([['Acme','Updated role',job['url'],'US',''], ['<Synthetic Employer>','Engineering Intern','https://jobs.lever.co/synthetic/csv-new','','']])
+    sock = socket.socket(); sock.bind(('127.0.0.1',0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width':320,'height':844},accept_downloads=True)
+            errors = []; page.on('pageerror',lambda error:errors.append(str(error)))
+            for endpoint in ('posting-import-preview','posting-import'):
+                assert page.request.post(base+'/api/'+endpoint,data=data).status == 403
+            assert page.request.post(base+'/api/posting-import',data=data,headers={'X-Hireme-Token':'fixture-capability'}).status == 400
+            page.goto(base+'/#token=fixture-capability')
+            page.locator('#posting-import-panel summary').click()
+            expect(page.locator('#posting-import-file')).to_be_enabled()
+            with page.expect_download() as download: page.locator('#posting-import-template').click()
+            assert download.value.suggested_filename == 'posting-template.csv'
+            assert Path(download.value.path()).read_bytes().decode('utf-8-sig').startswith('Company,Role,Application URL')
+            upload = {'name':'synthetic-postings.csv','mimeType':'text/csv','buffer':data}
+            page.locator('#posting-import-file').set_input_files(upload)
+            page.locator('#posting-import-form button').click()
+            expect(page.locator('#posting-import-preview')).to_contain_text('2 postings ready')
+            expect(page.locator('#posting-import-preview')).to_contain_text('1 new postings')
+            expect(page.locator('#posting-import-preview')).to_contain_text('<Synthetic Employer>')
+            assert page.locator('#posting-import-preview img').count() == 0
+            assert store.db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0] == 1
+            page.evaluate('window.csvPreviewNode = document.querySelector("#posting-import-preview").firstElementChild')
+            page.evaluate('refresh()')
+            assert page.evaluate('csvPreviewNode === document.querySelector("#posting-import-preview").firstElementChild')
+            page.route('**/api/posting-import',lambda route:route.abort())
+            page.locator('#posting-import-save').click()
+            expect(page.locator('#posting-import-status')).to_contain_text('Cannot reach')
+            expect(page.locator('#posting-import-save')).to_be_enabled()
+            expect(page.locator('#posting-import-preview')).to_be_visible()
+            page.unroute('**/api/posting-import')
+            page.locator('#posting-import-save').click()
+            expect(page.locator('#posting-import-status')).to_contain_text('Saved 2 postings')
+            expect(page.locator('#posting-import-save')).to_be_hidden()
+            assert store.db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0] == 2
+            expect(page.locator('#posting-import-file')).to_be_focused()
+            assert store.db.execute('SELECT state FROM applications WHERE id=?',(aid,)).fetchone()[0] == 'unknown'
+            page.locator('#posting-import-file').set_input_files({'name':'bad.csv','mimeType':'text/csv','buffer':b'Company,Role,URL\nBad,Role,http://jobs.lever.co/bad/job'})
+            page.locator('#posting-import-form button').click()
+            expect(page.locator('#posting-import-status')).to_contain_text('Line 2')
+            expect(page.locator('#posting-import-save')).to_be_hidden()
+            assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            assert not store.db.execute('SELECT * FROM model_requests').fetchone()
+            browser.close()
     finally: process.terminate(); process.join(5)

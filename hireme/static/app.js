@@ -16,6 +16,8 @@ let state = null,
   view = "today";
 let refreshing = null;
 let backupBusy = false;
+let postingImportBusy = false,
+  postingImportPreview = null;
 let accountTransferBusy = false;
 let transcriptWithdrawalBusy = false;
 const selectedDownloadBusy = new Set();
@@ -2320,6 +2322,10 @@ function render() {
   if ($("#worker-error").textContent !== (state.worker_error || ""))
     $("#worker-error").textContent = state.worker_error || "";
   $("#recover-worker").disabled = state.demo || state.worker_running;
+  for (const control of $("#posting-import-form").elements)
+    control.disabled = state.demo || postingImportBusy;
+  $("#posting-import-save").disabled =
+    state.demo || postingImportBusy || !postingImportPreview;
   $("#demo-banner").hidden = !state.demo;
   updateScheduleControls();
   $("#download-backup").disabled =
@@ -2526,6 +2532,144 @@ $("#discover").onclick = async () => {
     note(error.message, true);
   }
 };
+function postingImportFeedback(text, error = false) {
+  const status = $("#posting-import-status");
+  status.textContent = text;
+  status.setAttribute("role", error ? "alert" : "status");
+}
+function clearPostingPreview() {
+  postingImportPreview = null;
+  $("#posting-import-preview").hidden = true;
+  $("#posting-import-save").hidden = true;
+  $("#posting-import-save").disabled = true;
+}
+$("#posting-import-file").onchange = () => {
+  clearPostingPreview();
+  postingImportFeedback("");
+};
+$("#posting-import-template").onclick = () => {
+  const url = URL.createObjectURL(
+    new Blob(["\uFEFFCompany,Role,Application URL,Location,Posting text\r\n"], {
+      type: "text/csv;charset=utf-8",
+    }),
+  );
+  const anchor = el("a");
+  anchor.href = url;
+  anchor.download = "posting-template.csv";
+  document.body.append(anchor);
+  anchor.click();
+  anchor.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
+$("#posting-import-form").onsubmit = async (event) => {
+  event.preventDefault();
+  if (!state || state.demo || postingImportBusy) return;
+  clearPostingPreview();
+  const file = $("#posting-import-file").files[0];
+  if (!file || !file.size || file.size > 1024 ** 2) {
+    postingImportFeedback(
+      "Choose a CSV up to 1 MiB with at most 500 postings.",
+      true,
+    );
+    return;
+  }
+  postingImportBusy = true;
+  render();
+  postingImportFeedback("Checking every posting before saving…");
+  try {
+    const result = await api("/api/posting-import-preview", file, true, {
+      "Content-Type": "text/csv",
+    });
+    postingImportPreview = { file, hash: result.hash };
+    const preview = $("#posting-import-preview");
+    preview.replaceChildren(
+      el("h3", `${result.total.toLocaleString()} postings ready to add`),
+    );
+    preview.append(
+      el(
+        "p",
+        `${result.new.toLocaleString()} new postings · ${result.existing.toLocaleString()} existing postings to refresh.`,
+      ),
+    );
+    const list = el("ul");
+    for (const row of result.sample)
+      list.append(
+        el(
+          "li",
+          [row.company, row.title, row.location].filter(Boolean).join(" · "),
+        ),
+      );
+    preview.append(list);
+    if (result.total > result.sample.length)
+      preview.append(
+        el(
+          "p",
+          `Showing the first ${result.sample.length} of ${result.total} checked rows.`,
+          "help",
+        ),
+      );
+    preview.append(
+      el(
+        "p",
+        "Existing application outcomes and company limits stay in place. This import does not prepare or submit applications.",
+        "help",
+      ),
+    );
+    preview.hidden = false;
+    $("#posting-import-save").hidden = false;
+    $("#posting-import-save").textContent =
+      `Add ${result.total.toLocaleString()} checked postings`;
+    postingImportFeedback(
+      "CSV checked. Review the preview, then add the postings when ready.",
+    );
+  } catch (error) {
+    postingImportFeedback(error.message, true);
+  } finally {
+    postingImportBusy = false;
+    render();
+  }
+};
+$("#posting-import-save").onclick = async () => {
+  if (!state || state.demo || postingImportBusy || !postingImportPreview)
+    return;
+  const button = $("#posting-import-save"),
+    hadFocus = document.activeElement === button;
+  let saved = false;
+  const checked = postingImportPreview;
+  postingImportBusy = true;
+  render();
+  postingImportFeedback("Saving the checked postings…");
+  try {
+    const result = await api("/api/posting-import", checked.file, true, {
+      "Content-Type": "text/csv",
+      "X-Import-Hash": checked.hash,
+    });
+    clearPostingPreview();
+    $("#posting-import-form").reset();
+    saved = true;
+    await refresh();
+    postingImportFeedback(
+      `Saved ${result.total.toLocaleString()} postings: ${result.new.toLocaleString()} new and ${result.existing.toLocaleString()} refreshed. Application outcomes stay unchanged.`,
+    );
+  } catch (error) {
+    postingImportFeedback(
+      `${error.message} Your checked preview is available to try again.`,
+      true,
+    );
+  } finally {
+    postingImportBusy = false;
+    render();
+    if (
+      hadFocus &&
+      (document.activeElement === document.body ||
+        document.activeElement === button)
+    )
+      (saved ? $("#posting-import-file") : button).focus({
+        preventScroll: true,
+      });
+  }
+};
+
 $("#job-form").onsubmit = async (e) => {
   e.preventDefault();
   try {

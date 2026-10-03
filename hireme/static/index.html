@@ -349,6 +349,52 @@
               ><button type="submit">Add to discovery queue</button>
             </form>
           </details>
+          <details id="posting-import-panel" class="section">
+            <summary>Add postings from a spreadsheet</summary>
+            <p class="help">
+              Save your spreadsheet as a UTF-8 CSV with Company, Role and
+              Application URL columns. Location and Posting text are optional.
+              You can also use an exported opportunity ledger. Import up to 500
+              rows in a file up to 1 MiB.
+            </p>
+            <p class="help">
+              Use official links from Ashby, Greenhouse, Lever, Workable,
+              SmartRecruiters or a supported employer portal. Adding postings
+              saves discovery metadata; eligibility is checked before preparing
+              an application.
+            </p>
+            <button
+              type="button"
+              class="secondary"
+              id="posting-import-template"
+            >
+              Download blank CSV template
+            </button>
+            <form id="posting-import-form" method="post" class="form-grid">
+              <label
+                >Posting CSV<input
+                  type="file"
+                  id="posting-import-file"
+                  accept=".csv,text/csv"
+                  required
+                  disabled
+              /></label>
+              <button type="submit" class="secondary" disabled>
+                Check CSV
+              </button>
+            </form>
+            <p id="posting-import-status" class="help" role="status"></p>
+            <div id="posting-import-preview" hidden></div>
+            <button
+              type="button"
+              class="primary"
+              id="posting-import-save"
+              hidden
+              disabled
+            >
+              Add checked postings
+            </button>
+          </details>
           <details id="prepare-panel" class="section">
             <summary>Prepare drafts without submitting</summary>
             <p>

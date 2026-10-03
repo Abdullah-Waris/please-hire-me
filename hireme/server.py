@@ -252,6 +252,9 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
             try:
                 size=int(self.headers.get('Content-Length','0'))
                 path=urlsplit(self.path).path
+                if path in ('/api/posting-import-preview','/api/posting-import'):
+                    from .posting_import import MAX_BYTES
+                    if not 0<size<=MAX_BYTES:return self.send(413,{'error':'Choose a CSV up to 1 MiB with at most 500 postings'})
                 if path=='/api/backup-check':
                     from .backup_inspection import inspect_upload,MAX_UPLOAD
                     if not 0<size<=MAX_UPLOAD:return self.send(413,{'error':'Choose a history backup ZIP up to 1 GiB'})
@@ -275,6 +278,10 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     if path=='/api/material-upload':
                         from .materials import import_material
                         result=import_material(store,raw,unquote(self.headers.get('X-Upload-Name','')),self.headers.get('X-Material-Kind',''))
+                        return self.send(200,result)
+                    if path in ('/api/posting-import-preview','/api/posting-import'):
+                        from .posting_import import preview_postings,import_postings
+                        result=preview_postings(store,raw) if path.endswith('-preview') else import_postings(store,raw,self.headers.get('X-Import-Hash',''))
                         return self.send(200,result)
                     data=json.loads(raw)
                     if path=='/api/account-vault-export':

@@ -1764,6 +1764,13 @@ pre {
 #backup-check-status {
   overflow-wrap: anywhere;
 }
+#posting-import-preview,
+#posting-import-status {
+  overflow-wrap: anywhere;
+}
+#posting-import-status {
+  white-space: pre-line;
+}
 .account-transfer-grid form {
   min-width: 0;
 }
