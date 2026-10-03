@@ -284,6 +284,9 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                         result=preview_postings(store,raw) if path.endswith('-preview') else import_postings(store,raw,self.headers.get('X-Import-Hash',''))
                         return self.send(200,result)
                     data=json.loads(raw)
+                    if path=='/api/saved-view':
+                        from .saved_views import change_view
+                        return self.send(200,change_view(store,data))
                     if path=='/api/account-vault-export':
                         from .account_transfer_web import export_payload
                         if not isinstance(data,dict):raise ValueError('Provide a transfer passphrase and confirmation')

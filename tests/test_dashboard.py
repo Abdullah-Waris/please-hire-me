@@ -1089,7 +1089,7 @@ def test_demo_is_read_only_and_export_requires_auth(tmp_path):
         except urllib.error.HTTPError as error: assert error.code == 403
         try: urllib.request.urlopen(base + '/api/diagnostics'); assert False
         except urllib.error.HTTPError as error: assert error.code == 403
-        for endpoint in ('pause', 'resume-worker', 'run', 'discover', 'facts', 'settings', 'complete-setup', 'backup', 'recover', 'answer-revoke', 'schedule-apply', 'company-skip', 'company-allow', 'account-vault-export', 'account-vault-import', 'backup-check', 'posting-import-preview', 'posting-import'):
+        for endpoint in ('pause', 'resume-worker', 'run', 'discover', 'facts', 'settings', 'complete-setup', 'backup', 'recover', 'answer-revoke', 'schedule-apply', 'company-skip', 'company-allow', 'account-vault-export', 'account-vault-import', 'backup-check', 'posting-import-preview', 'posting-import', 'saved-view'):
             request = urllib.request.Request(base + '/api/' + endpoint, data=b'{}', headers={'X-Hireme-Token': 'fixture-capability'})
             try: urllib.request.urlopen(request); assert False
             except urllib.error.HTTPError as error:
@@ -1117,6 +1117,12 @@ def test_demo_is_read_only_and_export_requires_auth(tmp_path):
             from pypdf import PdfReader
             text=PdfReader(sample.value.path()).pages[0].extract_text()
             assert 'No application was sent' in text and 'Sample Applicant' in text
+            page.locator('#saved-views-panel summary').click()
+            expect(page.locator('#saved-view-form input')).to_be_disabled()
+            page.get_by_role('button',name='Open view: Ready to evaluate',exact=True).click()
+            expect(page.locator('#status-filter')).to_have_value('discovered')
+            expect(page.locator('#ledger-count')).to_have_text('2')
+            expect(page.get_by_role('button',name='Remove view: Ready to evaluate',exact=True)).to_be_disabled()
             page.locator('[data-view=setup]').click()
             page.locator('#setup-diagnostics').evaluate('(element)=>element.open=true')
             page.locator('#check-setup').click()
@@ -2068,3 +2074,58 @@ def test_posting_csv_browser_previews_retries_and_keeps_attempt_history(store, j
             assert not store.db.execute('SELECT * FROM model_requests').fetchone()
             browser.close()
     finally: process.terminate(); process.join(5)
+
+
+def test_saved_views_browser_restore_filters_retry_and_preserve_private_drafts(store, job, package):
+    from playwright.sync_api import sync_playwright, expect
+    aid=store.prepare(job,package)
+    before=dict(store.db.execute('SELECT * FROM applications WHERE id=?',(aid,)).fetchone())
+    sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port));process.start()
+    base=f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try:urllib.request.urlopen(base).close();break
+            except OSError:time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch();page=browser.new_page(viewport={'width':320,'height':844})
+            errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
+            assert page.request.post(base+'/api/saved-view',data={'action':'save','name':'Unauthorized'}).status==403
+            page.goto(base+'/#token=fixture-capability')
+            page.locator('#saved-views-panel summary').click()
+            expect(page.locator('#saved-view-form input')).to_be_enabled()
+            page.locator('#job-search').fill('Acme');page.locator('#status-filter').select_option('prepared');page.locator('#job-sort').select_option('fit')
+            page.locator('#saved-view-form input').fill('My prepared roles')
+            page.locator('#saved-view-form button').click()
+            expect(page.locator('#saved-views')).to_contain_text('My prepared roles')
+            page.locator('[data-view=settings]').click();page.locator('#settings-form [name=schedule_hours]').fill('7')
+            page.locator('[data-view=today]').click()
+            page.locator('#job-search').fill('');page.locator('#status-filter').select_option('all');page.locator('#job-sort').select_option('recent')
+            page.route('**/api/jobs?*',lambda route:route.fulfill(status=503,json={'error':'Synthetic saved-view connection failure'}))
+            open_button=page.get_by_role('button',name='Open view: My prepared roles',exact=True)
+            open_button.click()
+            expect(page.locator('#saved-view-status')).to_contain_text('previous filters and results')
+            expect(page.locator('#job-search')).to_have_value('');expect(page.locator('#status-filter')).to_have_value('all')
+            expect(open_button).to_be_enabled();expect(open_button).to_be_focused()
+            page.unroute('**/api/jobs?*')
+            open_button.click()
+            expect(page.locator('#saved-view-status')).to_contain_text('Opened view: My prepared roles')
+            expect(page.locator('#job-search')).to_have_value('Acme');expect(page.locator('#status-filter')).to_have_value('prepared');expect(page.locator('#job-sort')).to_have_value('fit')
+            expect(page.locator('#jobs')).to_be_focused()
+            page.locator('[data-view=settings]').click();expect(page.locator('#settings-form [name=schedule_hours]')).to_have_value('7')
+            page.locator('[data-view=today]').click()
+            replace=page.get_by_role('button',name='Replace with current filters: My prepared roles',exact=True)
+            replace.focus();page.evaluate('window.savedViewButton=document.activeElement');page.evaluate('refresh()')
+            assert page.evaluate('savedViewButton===document.activeElement')
+            page.locator('#job-search').fill('Python');replace.click()
+            expect(page.locator('#saved-views')).to_contain_text('Search: Python')
+            expect(replace).to_be_focused()
+            assert store.db.execute('SELECT search FROM saved_views').fetchone()[0]=='Python'
+            page.get_by_role('button',name='Remove view: My prepared roles',exact=True).click()
+            expect(page.locator('#saved-views')).to_contain_text('No saved views yet')
+            expect(page.locator('#saved-view-form input')).to_be_focused()
+            assert dict(store.db.execute('SELECT * FROM applications WHERE id=?',(aid,)).fetchone())==before
+            assert not errors and page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            assert not store.db.execute('SELECT * FROM model_requests').fetchone()
+            browser.close()
+    finally:process.terminate();process.join(5)

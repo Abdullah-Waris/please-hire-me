@@ -24,6 +24,9 @@ def seed(store):
                            'target_per_day': 12, 'max_per_day': 20, 'target_per_cycle': 3,
                            'max_per_cycle': 5, 'provider': 'codex-cli',
                            'company_aliases': {'Cedar Labs Inc': 'Cedar Labs'}})
+    from .saved_views import change_view
+    for name,status in (('Ready to evaluate','discovered'),('Needs an answer','blocked'),('Uncertain outcomes','unknown')):
+        change_view(store,{'action':'save','name':name,'search':'','status':status,'sort':'fit'})
     entries = [
         ('Cedar Labs', 'Software Engineer Intern', 'New York, NY', 'confirmed', 92, ''),
         ('Meridian', 'New Grad Software Engineer', 'Remote (US)', 'confirmed', 87, ''),

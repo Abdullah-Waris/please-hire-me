@@ -16,6 +16,8 @@ let state = null,
   view = "today";
 let refreshing = null;
 let backupBusy = false;
+let savedViewBusy = false,
+  savedViewsSignature = null;
 let postingImportBusy = false,
   postingImportPreview = null;
 let accountTransferBusy = false;
@@ -497,6 +499,7 @@ async function loadLedger(reset = false) {
     }
     ledgerState = result;
     renderLedger();
+    return true;
   } catch (error) {
     if (request === ledgerRequest) {
       note(error.message, true);
@@ -507,12 +510,185 @@ async function loadLedger(reset = false) {
       }
       $("#ledger-page-label").textContent =
         "Could not refresh. Showing the last loaded results.";
+      return false;
     }
   } finally {
     if (request === ledgerRequest)
       $("#jobs").setAttribute("aria-busy", "false");
   }
 }
+function savedViewFeedback(text, error = false) {
+  const status = $("#saved-view-status");
+  status.textContent = text;
+  status.setAttribute("role", error ? "alert" : "status");
+}
+function currentViewFilters() {
+  return {
+    search: $("#job-search").value,
+    status: $("#status-filter").value,
+    sort: $("#job-sort").value,
+  };
+}
+function renderSavedViews() {
+  if (!state) return;
+  const views = state.saved_views || [];
+  const signature = JSON.stringify(views);
+  if (signature !== savedViewsSignature) {
+    const parent = $("#saved-views");
+    parent.replaceChildren();
+    if (!views.length)
+      parent.append(
+        el(
+          "p",
+          "No saved views yet. Set your filters, then give this view a name.",
+          "help",
+        ),
+      );
+    for (const item of views) {
+      const card = el("article", undefined, "saved-view");
+      card.append(el("h3", item.name));
+      const label = (selector, value) =>
+        [...$(selector).options].find((option) => option.value === value)
+          ?.textContent || value;
+      card.append(
+        el(
+          "p",
+          [
+            item.search ? `Search: ${item.search}` : "All companies and roles",
+            label("#status-filter", item.status),
+            label("#job-sort", item.sort),
+          ].join(" · "),
+          "help",
+        ),
+      );
+      const actions = el("div", undefined, "actions");
+      for (const [action, text] of [
+        ["open", "Open view"],
+        ["replace", "Replace with current filters"],
+        ["delete", "Remove view"],
+      ]) {
+        const button = el("button", text, "secondary");
+        button.type = "button";
+        button.dataset.viewAction = action;
+        button.dataset.viewId = item.id;
+        button.setAttribute("aria-label", `${text}: ${item.name}`);
+        button.onclick = () =>
+          action === "open"
+            ? openSavedView(item, button)
+            : changeSavedView(
+                {
+                  action,
+                  id: item.id,
+                  ...(action === "replace" ? currentViewFilters() : {}),
+                },
+                item.name,
+                button,
+              );
+        actions.append(button);
+      }
+      card.append(actions);
+      parent.append(card);
+    }
+    savedViewsSignature = signature;
+  }
+  for (const control of $("#saved-view-form").elements)
+    control.disabled = state.demo || savedViewBusy;
+  for (const button of $("#saved-views").querySelectorAll("button"))
+    button.disabled =
+      savedViewBusy || (state.demo && button.dataset.viewAction !== "open");
+  for (const control of [$("#job-search"), $("#status-filter"), $("#job-sort")])
+    control.disabled = savedViewBusy;
+}
+async function changeSavedView(data, name, button) {
+  if (!state || state.demo || savedViewBusy) return;
+  const focusedControl = document.activeElement;
+  const focused =
+    focusedControl === button || $("#saved-view-form").contains(focusedControl);
+  savedViewBusy = true;
+  renderSavedViews();
+  try {
+    if (refreshing) await refreshing;
+    const result = await api("/api/saved-view", data);
+    state.saved_views = result.views;
+    if (data.action === "save") {
+      $("#saved-view-form").reset();
+      saved($("#saved-view-form"));
+    }
+    savedViewFeedback(
+      data.action === "delete"
+        ? `Removed view: ${name}. Opportunity records stay unchanged.`
+        : `Saved view: ${name}.`,
+    );
+  } catch (error) {
+    savedViewFeedback(error.message, true);
+  } finally {
+    savedViewBusy = false;
+    renderSavedViews();
+    if (focused && document.activeElement === document.body) {
+      const replacement = [
+        ...$("#saved-views").querySelectorAll("button"),
+      ].find(
+        (candidate) =>
+          candidate.dataset.viewId === data.id &&
+          candidate.dataset.viewAction === data.action,
+      );
+      (replacement || $("#saved-view-form input")).focus({
+        preventScroll: true,
+      });
+    }
+  }
+}
+async function openSavedView(item, button) {
+  if (!state || savedViewBusy) return;
+  savedViewBusy = true;
+  const focused = document.activeElement === button;
+  let opened = false;
+  clearTimeout(ledgerTimer);
+  renderSavedViews();
+  let previous;
+  try {
+    if (refreshing) await refreshing;
+    previous = { ...currentViewFilters(), offset: ledgerOffset };
+    $("#job-search").value = item.search;
+    $("#status-filter").value = item.status;
+    $("#job-sort").value = item.sort;
+    const loaded = await loadLedger(true);
+    if (loaded === false) {
+      $("#job-search").value = previous.search;
+      $("#status-filter").value = previous.status;
+      $("#job-sort").value = previous.sort;
+      ledgerOffset = previous.offset;
+      renderLedger();
+      savedViewFeedback(
+        "Could not open the saved view. Your previous filters and results are available. Try Open view again.",
+        true,
+      );
+    } else if (loaded === true) {
+      opened = true;
+      savedViewFeedback(`Opened view: ${item.name}.`);
+    }
+  } finally {
+    savedViewBusy = false;
+    renderSavedViews();
+    if (
+      focused &&
+      (document.activeElement === document.body ||
+        document.activeElement === button)
+    ) {
+      if (opened) scrollLedgerIntoView();
+      else button.focus({ preventScroll: true });
+    }
+  }
+}
+$("#saved-view-form").onsubmit = (event) => {
+  event.preventDefault();
+  const name = $("#saved-view-form input").value;
+  return changeSavedView(
+    { action: "save", name, ...currentViewFilters() },
+    name,
+    $("#saved-view-form button"),
+  );
+};
 function renderLedger() {
   if (!state) return;
   $("#ledger-scope").textContent = "";
@@ -2327,6 +2503,7 @@ function render() {
   $("#posting-import-save").disabled =
     state.demo || postingImportBusy || !postingImportPreview;
   $("#demo-banner").hidden = !state.demo;
+  renderSavedViews();
   updateScheduleControls();
   $("#download-backup").disabled =
     state.demo || state.worker_running || backupBusy;
@@ -2355,7 +2532,7 @@ function render() {
   show(view);
 }
 async function refresh() {
-  if (materialPagingBusy) return;
+  if (materialPagingBusy || savedViewBusy) return;
   if (refreshing) {
     await refreshing;
     return refresh();

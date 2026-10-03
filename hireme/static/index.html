@@ -299,6 +299,29 @@
               >
             </div>
             <p id="ledger-scope" class="help ledger-scope"></p>
+            <details id="saved-views-panel" class="section">
+              <summary>Save and reopen your filters</summary>
+              <p class="help">
+                Name the current search, status and sorting. Saved views stay in
+                your private history and work after reopening the dashboard.
+                They change which opportunities you see.
+              </p>
+              <form id="saved-view-form" method="post" class="form-grid">
+                <label
+                  >View name<input
+                    name="name"
+                    required
+                    maxlength="48"
+                    placeholder="For example, prepared engineering roles"
+                    disabled
+                /></label>
+                <button type="submit" class="secondary" disabled>
+                  Save current filters
+                </button>
+              </form>
+              <p id="saved-view-status" class="help" role="status"></p>
+              <div id="saved-views"></div>
+            </details>
             <div id="jobs" tabindex="-1"></div>
             <div class="ledger-pagination">
               <span

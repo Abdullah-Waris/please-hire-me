@@ -17,6 +17,8 @@ from .config import DEFAULTS, FACTS, REQUIRED, validate_fact, validate_settings
 from .util import Blocked, atomic_json, company_normalizer, digest, now, private_dir
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS saved_views (id TEXT PRIMARY KEY,name TEXT NOT NULL,name_key TEXT UNIQUE NOT NULL,
+ search TEXT NOT NULL,status TEXT NOT NULL,sort TEXT NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS employer_accounts (id TEXT PRIMARY KEY, origin TEXT NOT NULL,
  company TEXT NOT NULL, state TEXT NOT NULL, updated TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS model_requests (id INTEGER PRIMARY KEY, timestamp TEXT NOT NULL, run_id TEXT NOT NULL, provider TEXT NOT NULL);
@@ -512,7 +514,8 @@ class Store:
         from .presentation import attention_sql
         condition,parameters=attention_sql('j')
         priority=f"({condition} OR EXISTS(SELECT 1 FROM questions q WHERE q.job_id=j.id AND q.resolved=0))"
-        return {"settings":self.settings(),"templates":self.templates(),"facts":self.facts(False),"missing_setup":self.missing_setup(),
+        from .saved_views import list_views
+        return {"saved_views":list_views(self),"settings":self.settings(),"templates":self.templates(),"facts":self.facts(False),"missing_setup":self.missing_setup(),
                 "jobs":rows(f"SELECT j.* FROM jobs j ORDER BY {priority} DESC,j.score DESC,j.first_seen DESC LIMIT 500",parameters),
                 "applications":rows(f"SELECT {'*' if include_packages else APPLICATION_METADATA} FROM applications ORDER BY (state IN ('unknown','awaiting_verification')) DESC,created DESC LIMIT 500"),
                 "questions":rows("SELECT * FROM questions WHERE resolved=0 ORDER BY rowid" + (" LIMIT ?" if question_limit is not None else ''), (question_limit,) if question_limit is not None else ()),

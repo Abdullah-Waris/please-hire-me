@@ -1771,6 +1771,28 @@ pre {
 #posting-import-status {
   white-space: pre-line;
 }
+.saved-view {
+  margin-top: 14px;
+  padding: 16px;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: white;
+  overflow-wrap: anywhere;
+}
+.saved-view h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+.saved-view .actions {
+  flex-wrap: wrap;
+}
+.saved-view button {
+  max-width: 100%;
+  white-space: normal;
+}
+#saved-view-status {
+  overflow-wrap: anywhere;
+}
 .account-transfer-grid form {
   min-width: 0;
 }
