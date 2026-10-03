@@ -506,6 +506,8 @@ class Store:
     def snapshot(self,material_offset=0,include_packages=True,question_limit=None):
         if type(material_offset) is not int or not 0<=material_offset<=1000000:raise ValueError("Invalid material page")
         if question_limit is not None and (type(question_limit) is not int or not 1<=question_limit<=100):raise ValueError('Invalid question limit')
+        material_count=self.db.execute('SELECT count(*) FROM materials').fetchone()[0]
+        material_offset=min(material_offset,max(0,(material_count-1)//20*20))
         def rows(q,parameters=()): return [dict(x) for x in self.db.execute(q,parameters)]
         from .presentation import attention_sql
         condition,parameters=attention_sql('j')
@@ -517,7 +519,7 @@ class Store:
                 "runs":rows("SELECT * FROM runs ORDER BY started DESC LIMIT 30"),
                 "sources":rows("SELECT * FROM sources ORDER BY (error!='') DESC,checked DESC,id LIMIT 100"),
                 "employer_accounts":rows("SELECT * FROM employer_accounts ORDER BY (state IN ('uncertain','creating','signing_in')) DESC,updated DESC,id LIMIT 100"),
-                "documents":[{**row,'available':self.document_available(row['kind'])} for row in rows("SELECT * FROM documents")],"materials":[dict(r) for r in self.db.execute("SELECT * FROM materials ORDER BY created DESC,id DESC LIMIT 20 OFFSET ?",(material_offset,))],"material_count":self.db.execute("SELECT count(*) FROM materials").fetchone()[0],"material_offset":material_offset}
+                "documents":[{**row,'available':self.document_available(row['kind'])} for row in rows("SELECT * FROM documents")],"materials":[dict(r) for r in self.db.execute("SELECT * FROM materials ORDER BY created DESC,id DESC LIMIT 20 OFFSET ?",(material_offset,))],"material_count":material_count,"material_offset":material_offset}
 
 
 @contextlib.contextmanager

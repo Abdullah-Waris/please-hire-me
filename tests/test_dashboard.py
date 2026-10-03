@@ -884,14 +884,14 @@ def test_material_upload_review_and_context_preferences(tmp_path):
             page.locator('#material-upload-form button').click()
             expect(page.locator('#material-list')).to_contain_text('Needs review')
             form=page.locator('.material-review')
-            form.locator('select').select_option('personal');form.locator('input[type=checkbox]').check();form.locator('button').click()
+            form.locator('select').select_option('personal');form.locator('input[type=checkbox]').check();form.get_by_role('button',name='Save reviewed source',exact=True).click()
             expect(page.locator('#material-list')).to_contain_text('Approved')
             store=Store(root)
             assert store.db.execute('SELECT confirmed,role FROM materials').fetchone()[0]==1
             assert len(store.templates())==1 and not store.facts()
             revision=store.db.execute('SELECT revision FROM materials').fetchone()[0]
             store.close()
-            page.locator('.material-review button').click()
+            page.locator('.material-review').get_by_role('button',name='Save reviewed source',exact=True).click()
             expect(page.locator('#notice')).to_contain_text('Source unchanged')
             store=Store(root)
             assert store.db.execute('SELECT revision FROM materials').fetchone()[0]==revision
@@ -1734,5 +1734,47 @@ def test_account_queue_pages_old_holds_and_preserves_verification_drafts(store):
             expect(page.locator('#employer-accounts')).to_contain_text('Account verified')
             expect(page.locator('#employer-accounts form')).to_have_count(0)
             assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            browser.close()
+    finally: process.terminate(); process.join(5)
+
+
+def test_source_library_pages_preserve_edits_and_recover_from_failed_page_load(store):
+    from hireme.materials import import_material
+    from playwright.sync_api import sync_playwright, expect
+    for i in range(25): import_material(store, f'Synthetic source {i} with enough text for review.'.encode(), f'source-{i}.txt', 'context')
+    sock=socket.socket(); sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]; sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port)); process.start()
+    base=f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch(); page=browser.new_page(viewport={'width':320,'height':844})
+            page.goto(base+'/#token=fixture-capability')
+            page.locator('[data-view=materials]').click()
+            expect(page.locator('#material-list article')).to_have_count(20)
+            excerpt=page.locator('#material-list textarea').first
+            original=excerpt.input_value(); excerpt.fill('Synthetic unsaved excerpt that must survive paging.')
+            page.get_by_role('button',name='Older sources',exact=True).click()
+            expect(page.locator('#notice')).to_contain_text('Save your source edits')
+            expect(excerpt).to_have_value('Synthetic unsaved excerpt that must survive paging.')
+            page.get_by_role('button',name='Discard excerpt edits',exact=True).first.click()
+            expect(excerpt).to_have_value(original)
+            page.get_by_role('button',name='Older sources',exact=True).click()
+            expect(page.locator('#material-list article')).to_have_count(5)
+            expect(page.locator('#material-list')).to_be_focused()
+            expect(page.get_by_role('button',name='Older sources',exact=True)).to_be_disabled()
+            page.get_by_role('button',name='Newer sources',exact=True).click()
+            expect(page.locator('#material-list article')).to_have_count(20)
+            page.route('**/api/state?material_offset=20',lambda route:route.fulfill(status=503,content_type='application/json',body='{"error":"Synthetic page failure"}'))
+            page.get_by_role('button',name='Older sources',exact=True).click()
+            expect(page.locator('#notice')).to_contain_text('Could not change source pages')
+            expect(page.locator('#material-list article')).to_have_count(20)
+            expect(page.get_by_role('button',name='Older sources',exact=True)).to_be_enabled()
+            page.unroute('**/api/state?material_offset=20')
+            page.get_by_role('button',name='Older sources',exact=True).click()
+            expect(page.locator('#material-list article')).to_have_count(5)
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             browser.close()
     finally: process.terminate(); process.join(5)

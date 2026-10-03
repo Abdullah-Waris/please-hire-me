@@ -132,3 +132,12 @@ def test_review_failure_rolls_back_source_and_draft_invalidation(store, job, pac
     monkeypatch.setattr(store, 'event', failed)
     with pytest.raises(OSError): review_material(store, source['id'], source['text'], 'style', False)
     assert store.snapshot() == before
+
+
+def test_source_library_stale_page_clamps_to_last_nonempty_page(store):
+    for i in range(25): import_material(store, f'Synthetic source {i} with enough text for review.'.encode(), f'source-{i}.txt', 'context')
+    page = store.snapshot(100)
+    assert page['material_offset'] == 20 and len(page['materials']) == 5
+    store.db.execute('DELETE FROM materials')
+    empty = store.snapshot(20)
+    assert empty['material_offset'] == 0 and empty['materials'] == []

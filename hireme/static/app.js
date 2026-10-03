@@ -1,5 +1,6 @@
 "use strict";
 let materialOffset = 0;
+let materialPagingBusy = false;
 let token = new URLSearchParams(location.hash.slice(1)).get("token") || "";
 try {
   token ||= sessionStorage.getItem("hireme-token") || "";
@@ -2040,6 +2041,7 @@ function render() {
   show(view);
 }
 async function refresh() {
+  if (materialPagingBusy) return;
   if (refreshing) {
     await refreshing;
     return refresh();
@@ -2550,7 +2552,49 @@ $("#withdraw-transcript").onclick = async () => {
   }
 };
 
+function materialDrafts() {
+  return [...$("#material-list").querySelectorAll("form")].some((form) =>
+    dirtyForms.has(form),
+  );
+}
+async function changeMaterialPage(offset) {
+  if (refreshing) await refreshing;
+  if (materialPagingBusy) return;
+  if (materialDrafts())
+    return note(
+      "Save your source edits or choose Discard excerpt edits before changing pages.",
+      true,
+    );
+  const list = $("#material-list"),
+    controls = [...list.querySelectorAll("input,textarea,select,button")].map(
+      (control) => [control, control.disabled],
+    );
+  materialPagingBusy = true;
+  controls.forEach(([control]) => (control.disabled = true));
+  list.setAttribute("aria-busy", "true");
+  try {
+    const result = await api("/api/state?material_offset=" + offset);
+    state = result;
+    materialOffset = result.material_offset;
+    materialPagingBusy = false;
+    document.activeElement.blur();
+    render();
+    list.focus();
+    list.scrollIntoView({ block: "start" });
+  } catch (error) {
+    note(
+      `Could not change source pages. ${error.message} Try the page button again.`,
+      true,
+    );
+    controls.forEach(([control, disabled]) => (control.disabled = disabled));
+  } finally {
+    materialPagingBusy = false;
+    list.removeAttribute("aria-busy");
+  }
+}
 function renderMaterials() {
+  if (materialPagingBusy) return;
+  materialOffset = state.material_offset;
   const list = $("#material-list");
   if (
     list.contains(document.activeElement) ||
@@ -2564,14 +2608,9 @@ function renderMaterials() {
       next = el("button", "Older sources", "secondary");
     previous.disabled = materialOffset === 0;
     next.disabled = materialOffset + 20 >= state.material_count;
-    previous.onclick = async () => {
-      materialOffset = Math.max(0, materialOffset - 20);
-      await refresh();
-    };
-    next.onclick = async () => {
-      materialOffset += 20;
-      await refresh();
-    };
+    previous.onclick = () =>
+      changeMaterialPage(Math.max(0, materialOffset - 20));
+    next.onclick = () => changeMaterialPage(materialOffset + 20);
     controls.append(
       previous,
       el(
@@ -2628,7 +2667,19 @@ function renderMaterials() {
         "I reviewed this excerpt and approve its selected use. Uncheck to stop using it.",
       ),
     );
-    const button = el("button", "Save reviewed source");
+    const button = el("button", "Save reviewed source"),
+      discard = el("button", "Discard excerpt edits", "secondary");
+    discard.type = "button";
+    discard.onclick = () => {
+      text.value = source.text;
+      role.value = source.role;
+      approved.checked = !!source.confirmed;
+      saved(form);
+      text.focus();
+      note(
+        "Excerpt edits discarded. Saved approval and source text are unchanged.",
+      );
+    };
     form.append(
       textLabel,
       el(
@@ -2639,6 +2690,7 @@ function renderMaterials() {
       roleLabel,
       approvedLabel,
       button,
+      discard,
     );
     form.onsubmit = async (event) => {
       event.preventDefault();
