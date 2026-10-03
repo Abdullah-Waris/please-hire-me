@@ -34,6 +34,14 @@ def test_doctor_cli_json_and_verification_flag(store, monkeypatch, capsys):
     assert result['ready'] and result['verified_login'] and seen == [True]
 
 
+def test_doctor_explains_interrupted_work_without_recovering_it(store, monkeypatch):
+    monkeypatch.setattr('hireme.doctor.readiness', lambda s, verify=False: readiness())
+    store.db.execute("INSERT INTO runs(id,started,status) VALUES('stale-run','2020-01-01T00:00:00+00:00','running')")
+    result = diagnose(store)
+    assert not result['ready'] and 'hireme recover' in format_report(result)
+    assert store.db.execute("SELECT status FROM runs WHERE id='stale-run'").fetchone()[0] == 'running'
+
+
 @pytest.mark.parametrize('port', ['0', '-1', '65536', 'abc'])
 def test_dashboard_rejects_invalid_ports_before_opening_storage(port, tmp_path):
     root = tmp_path / 'untouched'

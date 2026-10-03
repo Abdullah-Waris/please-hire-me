@@ -342,7 +342,7 @@ def test_demo_is_read_only_and_export_requires_auth(tmp_path):
             except OSError: time.sleep(.1)
         try: urllib.request.urlopen(base + '/api/export.csv'); assert False
         except urllib.error.HTTPError as error: assert error.code == 403
-        for endpoint in ('pause', 'resume-worker', 'run', 'facts', 'settings', 'complete-setup', 'backup'):
+        for endpoint in ('pause', 'resume-worker', 'run', 'facts', 'settings', 'complete-setup', 'backup', 'recover'):
             request = urllib.request.Request(base + '/api/' + endpoint, data=b'{}', headers={'X-Hireme-Token': 'fixture-capability'})
             try: urllib.request.urlopen(request); assert False
             except urllib.error.HTTPError as error:
@@ -439,6 +439,16 @@ def test_essential_facts_optional_toggle_and_provider_fields(tmp_path):
             page.evaluate('refresh()')
             expect(page.locator('#provider-key-field')).to_be_visible()
             expect(page.locator('#provider-form [name=provider_model]')).to_have_value('fixture-model')
+            page.locator('#provider-form [name=key]').fill('synthetic-unused-provider-key')
+            page.locator('#provider-form [name=provider_model]').fill('invalid model with spaces')
+            page.locator('#provider-form button[type=submit]').click()
+            expect(page.locator('#notice')).to_contain_text('Use a model ID')
+            assert not (root / 'integrations/provider-key.json').exists()
+            page.locator('#provider-form [name=provider]').select_option('codex-cli')
+            page.locator('#provider-form [name=provider_model]').fill('')
+            page.locator('#provider-form button[type=submit]').click()
+            expect(page.locator('#notice')).to_contain_text('Connection saved')
+            assert not (root / 'integrations/provider-key.json').exists()
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             browser.close()
     finally: process.terminate(); process.join(5)
@@ -612,5 +622,41 @@ def test_full_ledger_search_and_pagination_preserve_old_evidence(store):
             page.locator('#job-search').fill('100%')
             expect(page.locator('#jobs tbody tr')).to_have_count(1)
             assert not errors
+            browser.close()
+    finally: process.terminate(); process.join(5)
+
+
+def test_dashboard_recovers_crashed_worker_and_refuses_live_recovery(store, job, package):
+    from playwright.sync_api import sync_playwright, expect
+    from hireme.store import worker_lock
+    application = store.prepare(job, package); store.begin_submit(application)
+    store.db.execute("INSERT INTO runs(id,started,status) VALUES('interrupted-run','2020-01-01T00:00:00+00:00','running')")
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with worker_lock(store.root):
+            request = urllib.request.Request(base + '/api/recover', data=b'{}', headers={'X-Hireme-Token': 'fixture-capability'})
+            try: urllib.request.urlopen(request); assert False
+            except urllib.error.HTTPError as error:
+                assert error.code == 400 and b'A batch is still running' in error.read()
+            assert store.settings()['live_enabled']
+            assert store.db.execute('SELECT state FROM applications WHERE id=?', (application,)).fetchone()[0] == 'submitting'
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page()
+            page.goto(base + '/#token=fixture-capability')
+            expect(page.locator('#recovery-banner')).to_be_visible()
+            expect(page.locator('#run')).to_be_disabled()
+            page.locator('#recover-worker').click()
+            expect(page.locator('#notice')).to_contain_text('Applications remain paused')
+            expect(page.locator('#recovery-banner')).to_be_hidden()
+            expect(page.locator('#pause')).to_have_text('Resume')
+            assert not store.settings()['live_enabled']
+            assert store.db.execute('SELECT state FROM applications WHERE id=?', (application,)).fetchone()[0] == 'unknown'
+            page.locator('[data-view=questions]').click()
+            expect(page.locator('#uncertain')).to_contain_text('Acme')
             browser.close()
     finally: process.terminate(); process.join(5)

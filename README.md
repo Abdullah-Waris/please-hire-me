@@ -110,6 +110,14 @@ These are ceilings and goals, not promises of throughput or remaining credits. R
 .venv/bin/python -m hireme daemon   # terminal scheduler alternative
 ```
 
+If a worker stopped unexpectedly, the dashboard checks the actual shared worker lock instead of trusting an old “running” record. **Recover and stay paused** moves interrupted submission intents to uncertain holds and unfinished employer accounts to manual verification. It never retries those actions. The terminal equivalent is:
+
+```bash
+.venv/bin/python -m hireme recover
+```
+
+A live worker must finish or pause before recovery can acquire its lock.
+
 Pause increments a shared cancellation generation and stops the active cycle at checkpoints, including active CLI inference. Resume permits a new cycle; it cannot revive the old one. A request already sent to an employer cannot be undone. An in-flight API/browser call may finish its timeout before cancellation is observed.
 
 macOS uses a LaunchAgent; Linux uses cron unless Pi systemd units are installed. Cron scheduling must divide 24 hours (1, 2, 3, 4, 6, 8, 12, or 24). Saving a different interval does not update an already-installed OS schedule: reinstall it with `hireme schedule install`. File locks prevent overlapping workers sharing a data directory.

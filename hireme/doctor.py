@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from .config import FACTS
 from .setup_status import readiness
+from .recovery import worker_status
 
 
 def diagnose(store, verify=False):
@@ -24,6 +25,10 @@ def diagnose(store, verify=False):
                   'detail': 'Required documents and facts are saved.' if not missing else 'Still needed: ' + ', '.join(FACTS.get(key, key) for key in missing),
                   'action': '' if not missing else 'Open the dashboard and follow Setup checklist.'})
     settings = store.settings()
+    worker = worker_status(store)
+    items.append({'name': 'Worker history', 'ready': not worker['recovery_needed'],
+                  'detail': 'A batch is running.' if worker['running'] else 'Interrupted work needs recovery.' if worker['recovery_needed'] else 'No interrupted work.',
+                  'action': 'Run: hireme recover. Applications stay paused while uncertain outcomes await verification.' if worker['recovery_needed'] else ''})
     items.append({'name': 'Submission control', 'ready': True,
                   'detail': 'Automatic submissions enabled.' if settings['live_enabled'] else 'Submissions paused.',
                   'action': ''})

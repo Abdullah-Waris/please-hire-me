@@ -47,6 +47,7 @@ def main(argv=None):
     p=sub.add_parser('import-tracker');p.add_argument('path',type=Path)
     sub.add_parser('status')
     sub.add_parser('pause');sub.add_parser('resume')
+    sub.add_parser('recover',help='Recover interrupted worker records and remain paused')
     p=sub.add_parser('login');p.add_argument('url')
     p=sub.add_parser('import-legacy');p.add_argument('path',type=Path,default=REPO,nargs='?')
     args=parser.parse_args(argv)
@@ -171,6 +172,9 @@ def main(argv=None):
             print(json.dumps({'blocked_companies':companies}))
         elif args.command=='status':
             print(json.dumps({'missing_setup':store.missing_setup(),'settings':store.settings(),'runs':store.snapshot()['runs']},indent=2))
+        elif args.command=='recover':
+            from .recovery import recover_interrupted
+            print(recover_interrupted(store)['message'])
         elif args.command in ('pause','resume'):store.update_settings({'live_enabled':args.command=='resume'});print(args.command)
         elif args.command=='login':
             from .discovery import ATS_HOSTS,PORTAL_HOSTS

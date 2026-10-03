@@ -79,6 +79,23 @@
             Reconnect
           </button>
         </div>
+        <div
+          id="recovery-banner"
+          class="connection-banner"
+          role="status"
+          hidden
+        >
+          <div>
+            <strong>Your previous work was interrupted.</strong>
+            <p id="recovery-detail" class="help">
+              Recover the recorded work before starting another batch. Uncertain
+              submissions stay held for your verification.
+            </p>
+          </div>
+          <button id="recover-worker" class="secondary" type="button">
+            Recover and stay paused
+          </button>
+        </div>
         <div id="notice" role="status" aria-live="polite"></div>
         <div id="demo-banner" class="demo-banner" hidden>
           <span
@@ -816,7 +833,7 @@
               too. CLI request caps do not guarantee remaining subscription
               credits.
             </p>
-            <button>Save connection</button>
+            <button type="submit">Save connection</button>
           </form>
           <div class="section">
             <h2>Install and sign in</h2>

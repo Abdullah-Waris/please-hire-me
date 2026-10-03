@@ -1049,11 +1049,13 @@ function render() {
       ? state.settings.live_enabled
         ? "Batch running"
         : "Pausing active batch…"
-      : !state.settings.onboarding_complete || state.missing_setup.length > 0
-        ? "Setup needed"
-        : state.settings.live_enabled
-          ? "Automatic submissions enabled"
-          : "Submissions paused";
+      : state.worker_recovery?.recovery_needed
+        ? "Recovery needed"
+        : !state.settings.onboarding_complete || state.missing_setup.length > 0
+          ? "Setup needed"
+          : state.settings.live_enabled
+            ? "Automatic submissions enabled"
+            : "Submissions paused";
   $("#pause").textContent = state.settings.live_enabled ? "Pause" : "Resume";
   $("#pause").disabled =
     state.demo ||
@@ -1061,10 +1063,13 @@ function render() {
       (!state.settings.onboarding_complete || state.missing_setup.length > 0));
   $("#run").disabled =
     state.demo ||
+    state.worker_recovery?.recovery_needed ||
     state.worker_running ||
     !state.settings.onboarding_complete ||
     !state.settings.live_enabled ||
     state.missing_setup.length > 0;
+  $("#recovery-banner").hidden = !state.worker_recovery?.recovery_needed;
+  $("#recover-worker").disabled = state.demo || state.worker_running;
   $("#demo-banner").hidden = !state.demo;
   $("#download-backup").disabled =
     state.demo || state.worker_running || backupBusy;
@@ -1667,9 +1672,14 @@ $("#provider-form").onsubmit = async (event) => {
   const form = event.target;
   const provider = form.elements.provider.value;
   try {
-    if (provider.endsWith("-api") && !form.elements.provider_model.value.trim())
+    const model = form.elements.provider_model.value.trim();
+    if (provider.endsWith("-api") && !model)
       throw new Error("Enter an exact model ID for API mode.");
-    if (form.elements.key.value) {
+    if (model && !/^[A-Za-z0-9._:/-]{1,100}$/.test(model))
+      throw new Error(
+        "Use a model ID of up to 100 letters, numbers, dots, underscores, colons, slashes, or hyphens.",
+      );
+    if (provider.endsWith("-api") && form.elements.key.value) {
       await api("/api/provider-key", {
         provider,
         key: form.elements.key.value,
@@ -1678,7 +1688,7 @@ $("#provider-form").onsubmit = async (event) => {
     }
     await api("/api/settings", {
       provider,
-      provider_model: form.elements.provider_model.value.trim(),
+      provider_model: model,
       deployment: form.elements.deployment.value,
     });
     saved(form);
@@ -2027,3 +2037,17 @@ function scrollLedgerIntoView() {
   });
   jobs.focus({ preventScroll: true });
 }
+
+$("#recover-worker").onclick = async (event) => {
+  const button = event.currentTarget;
+  button.disabled = true;
+  try {
+    const result = await api("/api/recover", {});
+    await refresh();
+    note(result.message);
+  } catch (error) {
+    note(error.message, true);
+  } finally {
+    if (state) render();
+  }
+};

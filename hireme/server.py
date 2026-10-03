@@ -97,7 +97,12 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     from .presentation import job_display
                     snapshot['jobs']=[{**job,**job_display(job)} for job in snapshot['jobs']]
                     snapshot['demo']=demo
-                    return self.send(200,{**snapshot,'fact_labels':FACTS,'required':sorted(REQUIRED),'worker_running':state['running'] or any(r['status']=='running' for r in snapshot['runs'])})
+                    from .recovery import worker_status
+                    activity=worker_status(store)
+                    with state['lock']:local_running=state['running']
+                    if local_running:activity={**activity,'running':True,'recovery_needed':False}
+                    snapshot['worker_recovery']=activity
+                    return self.send(200,{**snapshot,'fact_labels':FACTS,'required':sorted(REQUIRED),'worker_running':activity['running']})
                 if path=='/api/jobs':
                     from .ledger import search_jobs
                     query=parse_qs(urlsplit(self.path).query)
@@ -182,6 +187,15 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     elif path=='/api/template':result={'id':store.put_template(data['category'],data['body'])}
                     elif path=='/api/template-edit':result={'id':store.edit_template(data['id'],data['category'],data['body'])}
                     elif path=='/api/template-revoke':store.revoke_template(data['id']);result={'revoked':True}
+                    elif path=='/api/recover':
+                        with state['lock']:
+                            if state['running']:raise ValueError('A batch is still running. Pause it and wait before recovering interrupted work.')
+                        from .recovery import recover_interrupted
+                        from .util import Blocked
+                        try:result=recover_interrupted(store)
+                        except Blocked as error:
+                            if error.reason=='worker_busy':raise ValueError('A batch is still running. Pause it and wait before recovering interrupted work.') from None
+                            raise
                     elif path=='/api/pause':store.update_settings({'live_enabled':False});result={'paused':True}
                     elif path=='/api/resume-worker':store.update_settings({'live_enabled':True});result={'enabled':True}
                     elif path=='/api/settings':result=store.update_settings(data)
