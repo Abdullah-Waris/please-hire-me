@@ -60,6 +60,35 @@ def launch_preparation_fixture(root, repo, port):
     launch(root, repo, port)
 
 
+def launch_dashboard_preparation_fixture(root,repo,port):
+    from hireme import worker
+    from hireme.answers import resolve
+    from hireme.util import digest
+    worker.sweep_lists=lambda *args:None
+    worker.sweep_portals=lambda *args:None
+    worker.sweep_boards=lambda *args:None
+    class FakeBrowser:
+        def __init__(self,store):self.store=store
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def apply(self,job,live=True):
+            assert not live and not self.store.settings()['live_enabled']
+            field={'index':0,'indices':[0],'label':'Email','type':'email','required':True,'options':[],'maxlength':-1,'value':''}
+            document=dict(self.store.db.execute("SELECT * FROM documents WHERE kind='resume'").fetchone())
+            document['field']={'index':1,'label':'Resume','type':'file','required':True}
+            package={'job_id':job['id'],'url':job['url'],'answers':[resolve(self.store,job['host'],field)],'documents':[document],
+                     'facts_hash':digest(self.store.facts()),'steps':[{'fields':[field,document['field']]}]}
+            self.store.prepare(job,package)
+            for _ in range(500):
+                self.store.checkpoint()
+                if (self.store.root/'finish-preparation').exists():return 'prepared'
+                time.sleep(.01)
+            raise RuntimeError('Synthetic preparation fixture timed out')
+    real_cycle=worker.cycle
+    worker.cycle=lambda store,repo,**kwargs:real_cycle(store,repo,browser_factory=FakeBrowser,**kwargs)
+    launch(root,repo,port)
+
+
 def launch_worker_failure_fixture(root, repo, port, failure_mode):
     import threading
     from hireme import server, worker
@@ -154,6 +183,53 @@ def test_dashboard_stops_preparation_without_resuming_submissions(store, job):
             assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             browser.close()
     finally: process.terminate(); process.join(5)
+
+
+def test_dashboard_prepares_reviewable_drafts_while_staying_paused(store,job):
+    from playwright.sync_api import sync_playwright,expect
+    sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
+    process=multiprocessing.Process(target=launch_dashboard_preparation_fixture,args=(str(store.root),str(Path.cwd()),port));process.start()
+    base=f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try:urllib.request.urlopen(base).close();break
+            except OSError:time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch();page=browser.new_page(viewport={'width':320,'height':844});errors=[]
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.goto(base+'/#token=fixture-capability')
+            page.locator('#prepare-panel > summary').click()
+            expect(page.locator('#prepare')).to_be_disabled()
+            expect(page.locator('#prepare-help')).to_contain_text('Pause automatic submissions')
+            assert page.request.post(base+'/api/prepare',data={}).status==403
+            rejected=page.request.post(base+'/api/prepare',data={},headers={'X-Hireme-Token':'fixture-capability'})
+            assert rejected.status==400 and 'Pause automatic' in rejected.json()['error']
+            store.update_settings({'live_enabled':False});page.evaluate('refresh()')
+            expect(page.locator('#prepare')).to_be_enabled()
+            page.locator('#prepare').click()
+            expect(page.locator('#worker-state')).to_have_text('Preparing applications…')
+            expect(page.locator('#prepare')).to_be_disabled()
+            expect(page.locator('#pause')).to_have_text('Stop preparation & pause')
+            assert not store.settings()['live_enabled']
+            (store.root/'finish-preparation').touch()
+            for _ in range(100):
+                row=store.db.execute('SELECT * FROM runs').fetchone()
+                if row and row['status']=='finished':break
+                time.sleep(.02)
+            page.evaluate('refresh()')
+            expect(page.locator('#worker-state')).to_have_text('Submissions paused')
+            expect(page.locator('#prepare')).to_be_enabled()
+            page.locator('#status-filter').select_option('prepared')
+            expect(page.locator('#jobs')).to_contain_text('Prepared')
+            page.locator('#jobs details[data-evidence-id]').first.evaluate('(element)=>element.open=true')
+            expect(page.locator('#jobs .answer-log')).to_contain_text('test@candidate.invalid')
+            assert row['submitted']==0 and json.loads(row['detail'])['prepared']==1
+            assert store.db.execute('SELECT state FROM applications').fetchone()[0]=='prepared'
+            assert not store.db.execute('SELECT * FROM model_requests').fetchone()
+            assert not store.settings()['live_enabled']
+            assert not errors and page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            browser.close()
+    finally:process.terminate();process.join(5)
 
 
 def test_find_opportunities_and_stop_without_enabling_submissions(tmp_path):

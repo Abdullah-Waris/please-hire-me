@@ -270,6 +270,7 @@
                     Email verification pending
                   </option>
                   <option value="discovered">Ready to evaluate</option>
+                  <option value="prepared">Prepared drafts</option>
                 </select></label
               ><label class="filter-field"
                 ><span>Sort</span
@@ -330,6 +331,24 @@
                 ></textarea></label
               ><button type="submit">Add to discovery queue</button>
             </form>
+          </details>
+          <details id="prepare-panel" class="section">
+            <summary>Prepare drafts without submitting</summary>
+            <p>
+              While submissions are paused, prepare application answers and
+              documents for review. This uses your normal model and batch
+              limits. The worker keeps submissions paused and holds forms that
+              need an account or your help.
+            </p>
+            <button id="prepare" type="button" class="secondary" disabled>
+              Prepare drafts
+            </button>
+            <p id="prepare-help" class="help"></p>
+            <p class="help">
+              Choose Prepared drafts in the ledger’s status filter, then open
+              Answers &amp; evidence to review saved work. A later live batch
+              rechecks answers and documents before submitting.
+            </p>
           </details>
           <div class="section-head">
             <div>

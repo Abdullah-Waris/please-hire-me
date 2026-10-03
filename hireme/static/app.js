@@ -1984,6 +1984,24 @@ function render() {
     !state.settings.onboarding_complete ||
     !state.settings.live_enabled ||
     state.missing_setup.length > 0;
+  $("#prepare").disabled =
+    state.demo ||
+    state.worker_running ||
+    state.worker_recovery?.recovery_needed ||
+    !state.settings.onboarding_complete ||
+    state.missing_setup.length > 0 ||
+    state.settings.live_enabled;
+  $("#prepare-help").textContent = state.demo
+    ? "Draft preparation is available in your own workspace."
+    : state.worker_running
+      ? "Wait for the active batch to finish, or use Stop preparation & pause to cancel."
+      : state.worker_recovery?.recovery_needed
+        ? "Recover interrupted work before preparing drafts."
+        : !state.settings.onboarding_complete || state.missing_setup.length > 0
+          ? "Finish Setup checklist before preparing drafts."
+          : state.settings.live_enabled
+            ? "Pause automatic submissions to prepare drafts for review."
+            : "Ready to prepare. Submissions will stay paused.";
   $("#recovery-banner").hidden = !state.worker_recovery?.recovery_needed;
   $("#worker-error").hidden = !state.worker_error;
   if ($("#worker-error").textContent !== (state.worker_error || ""))
@@ -2158,6 +2176,17 @@ $("#run").onclick = async () => {
     await refresh();
   } catch (e) {
     note(e.message, true);
+  }
+};
+$("#prepare").onclick = async () => {
+  $("#prepare").disabled = true;
+  try {
+    await api("/api/prepare", {});
+    note("Preparing drafts for review. Submissions remain paused.");
+    await refresh();
+  } catch (error) {
+    note(error.message, true);
+    await refresh();
   }
 };
 $("#discover").onclick = async () => {

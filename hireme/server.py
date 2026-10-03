@@ -45,16 +45,21 @@ def dashboard_url(root,port=8766):
 def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
     token=token or (secrets.token_urlsafe(32) if demo else dashboard_url(root,port).split('#token=',1)[1]); state={'running':False,'mode':None,'error':None,'lock':threading.Lock()}
     assets=Path(__file__).parent/'static'
-    def start_cycle(discovery_only=False):
+    def start_cycle(discovery_only=False,preparation_only=False):
         generation=None
-        if discovery_only:
+        if discovery_only or preparation_only:
             control=Store(root)
-            try:generation=control.control_generation()
+            try:
+                with control.transaction():
+                    if preparation_only:
+                        if control.settings()['live_enabled']:raise ValueError('Pause automatic submissions before preparing drafts.')
+                        if not control.settings()['onboarding_complete'] or control.missing_setup():raise ValueError('Finish Setup checklist before preparing drafts.')
+                    generation=control.control_generation()
             finally:control.close()
         with state['lock']:
             if state['running']:raise ValueError('A dashboard-triggered run is already active')
             state['running']=True
-            state['mode']='discovery' if discovery_only else 'live'
+            state['mode']='discovery' if discovery_only else 'prepare' if preparation_only else 'live'
             state['error']=None
         def run():
             worker=None;failure=None
@@ -65,7 +70,8 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     find_opportunities(worker,repo,requested_generation=generation)
                 else:
                     from .worker import cycle
-                    cycle(worker,repo)
+                    if preparation_only:cycle(worker,repo,live=False,requested_generation=generation)
+                    else:cycle(worker,repo)
             except Exception as e:
                 failure=_action_failure(e,discovery_only)
                 if worker is not None and failure is not None:
@@ -352,6 +358,8 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                         result={'id':store.upsert_job(job)}
                     elif path=='/api/run':
                         start_cycle();result={'started':True}
+                    elif path=='/api/prepare':
+                        start_cycle(preparation_only=True);result={'started':True,'mode':'prepare'}
                     elif path=='/api/discover':
                         start_cycle(discovery_only=True);result={'started':True,'mode':'discovery'}
                     else:return self.send(404,{'error':'Not found'})

@@ -119,6 +119,19 @@ def test_resume_cannot_revive_cancelled_preparation_or_reserve_another_request(s
     assert store.db.execute('SELECT COUNT(*) FROM model_requests').fetchone()[0] == 0
 
 
+def test_preparation_requested_before_pause_cannot_start_later(store,monkeypatch):
+    store.update_settings({'live_enabled':False})
+    generation=store.control_generation()
+    store.update_settings({'live_enabled':False})
+    monkeypatch.setattr('hireme.worker.sweep_lists',lambda s:pytest.fail('Cancelled queued preparation must not discover'))
+    with pytest.raises(Blocked,match='paused'):
+        cycle(store,Path('.'),live=False,requested_generation=generation)
+    row=store.db.execute('SELECT * FROM runs').fetchone()
+    assert row['status']=='paused' and row['submitted']==0
+    assert store.db.execute('SELECT COUNT(*) FROM model_requests').fetchone()[0]==0
+    assert store.preparation_generation is None and store.run_deadline is None
+
+
 def test_time_budget_stops_discovery_before_the_next_source(store, monkeypatch):
     clock = [100.0]; visited = []
     monkeypatch.setattr('hireme.worker.time.monotonic', lambda: clock[0])

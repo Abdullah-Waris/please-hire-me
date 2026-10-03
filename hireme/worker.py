@@ -14,11 +14,11 @@ from .util import Blocked,now
 from .store import worker_lock
 
 
-def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,max_attempts=None,job_ids=None):
+def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,max_attempts=None,job_ids=None,requested_generation=None):
     with worker_lock(store.root):
         store.recover()
         store.run_generation=store.control_generation() if live else None
-        store.preparation_generation=store.control_generation() if not live else None
+        store.preparation_generation=(store.control_generation() if requested_generation is None else requested_generation) if not live else None
         rid=uuid.uuid4().hex; s=store.settings(); count=0; attempts=0; reasons={}; outcomes={}; start=time.monotonic()
         store.run_deadline=start+s['cycle_timeout_seconds']
         store.active_run_id=rid
@@ -27,6 +27,7 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,
         try:
             if store.missing_setup() or not s['onboarding_complete']:
                 raise Blocked('setup_incomplete',', '.join(store.missing_setup()))
+            store.checkpoint()
             if live and not s['live_enabled']:raise Blocked('paused')
             if discover:
                 store.checkpoint(); sweep_lists(store)
