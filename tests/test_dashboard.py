@@ -903,6 +903,7 @@ def test_material_upload_review_and_context_preferences(tmp_path):
             store.close()
             page.evaluate('refresh()')
             expect(page.locator('.source-file-warning')).to_contain_text('original file is missing')
+            expect(page.locator('.material-review').get_by_role('button',name='Save reviewed source',exact=True)).to_be_focused()
             page.locator('#material-upload-form input[type=file]').set_input_files({'name':'research-notes.txt','mimeType':'text/plain','buffer':b'I built Python services for an operational workflow and tested their behavior.'})
             page.locator('#material-upload-form button').click()
             expect(page.locator('#notice')).to_contain_text('Original source file restored')
@@ -2174,4 +2175,78 @@ def test_tool_search_navigates_without_writes_and_preserves_drafts_and_keyboard_
             assert not writes and not errors and page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             browser.close()
         assert store.snapshot()==before
+    finally:process.terminate();process.join(5)
+
+
+def test_pending_form_save_freezes_its_payload_and_preserves_other_form_drafts(store):
+    from playwright.sync_api import sync_playwright,expect
+    sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port));process.start()
+    base=f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try:urllib.request.urlopen(base).close();break
+            except OSError:time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch();page=browser.new_page(viewport={'width':390,'height':844})
+            errors=[];pending=[];page.on('pageerror',lambda error:errors.append(str(error)))
+            page.goto(base+'/#token=fixture-capability');page.locator('[data-view=settings]').click()
+            form=page.locator('#settings-form');field=form.locator('[name=min_fit_score]')
+            expect(field).to_have_value('45');field.fill('51')
+            page.route('**/api/settings',lambda route:pending.append(route))
+            with page.expect_request('**/api/settings'):form.get_by_role('button',name='Save preferences',exact=True).click()
+            expect(field).to_be_disabled();expect(form).to_have_attribute('inert','')
+            assert pending[0].request.post_data_json['min_fit_score']==51
+            assert form.evaluate("form=>!form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))")
+            assert len(pending)==1 and page.url==base+'/'
+            page.evaluate('refresh()');expect(field).to_be_disabled();expect(field).to_have_value('51')
+            page.locator('[data-view=profile]').click();page.locator('#show-optional-facts').check()
+            draft=page.locator('#facts-form [name=preferred_name]');draft.fill('New private draft while preferences save')
+            pending.pop().continue_()
+            expect(form).not_to_have_attribute('data-saving','true')
+            expect(draft).to_have_value('New private draft while preferences save');expect(draft).to_be_focused()
+            assert store.settings()['min_fit_score']==51
+            assert 'preferred_name' not in store.facts()
+            page.unroute('**/api/settings');page.locator('[data-view=settings]').click()
+            expect(field).to_be_enabled();expect(field).to_have_value('51')
+            field.fill('52')
+            page.route('**/api/settings',lambda route:route.fulfill(status=503,json={'error':'Synthetic interrupted save'}))
+            form.get_by_role('button',name='Save preferences',exact=True).click()
+            expect(page.locator('#notice')).to_contain_text('Synthetic interrupted save')
+            expect(form).not_to_have_attribute('inert','');expect(field).to_be_enabled();expect(field).to_have_value('52')
+            expect(page.locator('[data-draft-for=settings-form]')).to_contain_text('Unsaved changes')
+            assert store.settings()['min_fit_score']==51 and not errors
+            browser.close()
+    finally:process.terminate();process.join(5)
+
+
+def test_fact_form_capture_survives_pending_lock_and_restores_editable_confirmed_values(store):
+    from playwright.sync_api import sync_playwright,expect
+    sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port));process.start()
+    base=f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try:urllib.request.urlopen(base).close();break
+            except OSError:time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch();page=browser.new_page(viewport={'width':320,'height':844})
+            pending=[];errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
+            page.goto(base+'/#token=fixture-capability');page.locator('[data-view=profile]').click();page.locator('#show-optional-facts').check()
+            field=page.locator('#facts-form [name=preferred_name]');expect(field).to_be_visible();field.fill('Confirmed synthetic nickname')
+            page.locator('#confirm-facts').check()
+            page.route('**/api/facts',lambda route:pending.append(route))
+            with page.expect_request('**/api/facts'):page.locator('#facts-form button[type=submit]').click()
+            expect(field).to_be_disabled()
+            payload=pending[0].request.post_data_json
+            assert payload['facts']['preferred_name']=='Confirmed synthetic nickname' and payload['facts']['email']=='test@candidate.invalid'
+            assert page.locator('#facts-form').evaluate("form=>!form.dispatchEvent(new Event('submit',{bubbles:true,cancelable:true}))")
+            assert len(pending)==1
+            pending.pop().continue_()
+            expect(page.locator('#facts-form')).not_to_have_attribute('data-saving','true')
+            expect(field).to_be_enabled();expect(field).to_have_value('Confirmed synthetic nickname')
+            assert store.facts()['preferred_name']['value']=='Confirmed synthetic nickname'
+            expect(page.locator('#confirm-facts')).not_to_be_checked()
+            assert not errors and not store.db.execute('SELECT * FROM model_requests').fetchone()
+            browser.close()
     finally:process.terminate();process.join(5)

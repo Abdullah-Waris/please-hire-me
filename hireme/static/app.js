@@ -74,7 +74,14 @@ document.addEventListener("change", (event) => {
 });
 function editing(selector) {
   const form = $(selector);
-  return form.contains(document.activeElement) || dirtyForms.has(form);
+  return (
+    form.dataset.saving === "true" ||
+    form.contains(document.activeElement) ||
+    dirtyForms.has(form)
+  );
+}
+function blurForm(form) {
+  if (form.contains(document.activeElement)) document.activeElement.blur();
 }
 function saved(form) {
   if (!form) return;
@@ -198,7 +205,7 @@ function renderAccounts() {
             note: evidence.value,
           });
           saved(form);
-          document.activeElement.blur();
+          blurForm(form);
           await refresh();
           await loadAccountLedger();
           note("Account confirmed. The next batch can reuse its credentials.");
@@ -1660,7 +1667,7 @@ function renderQuestionList() {
           fact_key: bind.value || null,
         });
         saved(f);
-        document.activeElement.blur();
+        blurForm(f);
         note(
           "Answer saved. Matching applications can use it in the next cycle.",
         );
@@ -1880,7 +1887,7 @@ function renderOutcomes() {
           note: text.value,
         });
         saved(f);
-        document.activeElement.blur();
+        blurForm(f);
         box.remove();
         const previousLength = outcomeState.applications.length;
         outcomeState.applications = outcomeState.applications.filter(
@@ -2244,7 +2251,7 @@ function renderTemplates() {
             body: body.value,
           });
           saved(form);
-          document.activeElement.blur();
+          blurForm(form);
           await refresh();
           note(
             "Revised wording saved. Future answers must use the updated source.",
@@ -2258,7 +2265,7 @@ function renderTemplates() {
         try {
           await api("/api/template-revoke", { id: template.id });
           saved(form);
-          document.activeElement.blur();
+          blurForm(form);
           await refresh();
           note(
             "Approved wording withdrawn. It will no longer support new answers. Application history stays recorded.",
@@ -2930,7 +2937,7 @@ $("#facts-form").onsubmit = async (e) => {
         ? "Facts saved. Cleared values will no longer be reused."
         : "Confirmed facts saved. They will be reused automatically.",
     );
-    document.activeElement.blur();
+    blurForm(e.target);
     await refresh();
   } catch (e) {
     note(e.message, true);
@@ -2984,7 +2991,7 @@ $("#settings-form").onsubmit = async (event) => {
     await api("/api/settings", data);
     saved(event.target);
     note("Search preferences saved.");
-    document.activeElement.blur();
+    blurForm(event.target);
     await refresh();
     updateScheduleControls();
   } catch (error) {
@@ -3596,6 +3603,20 @@ async function changeMaterialPage(
     list.removeAttribute("aria-busy");
   }
 }
+function updateMaterialWarning(box, source) {
+  const warning = box.querySelector(".source-file-warning");
+  if (source.original_available !== false) {
+    warning?.remove();
+    return;
+  }
+  if (warning) return;
+  const message = el(
+    "p",
+    "The original file is missing, unreadable or has permissions that need repair. Re-upload the matching original with the same document purpose to repair it. Your reviewed excerpt is still saved.",
+    "source-file-warning",
+  );
+  box.insertBefore(message, box.querySelector("form"));
+}
 function renderMaterials() {
   if (materialPagingBusy) return;
   materialOffset = state.material_offset;
@@ -3603,6 +3624,14 @@ function renderMaterials() {
   if ($("#material-filter-status").textContent !== filterSummary)
     $("#material-filter-status").textContent = filterSummary;
   const list = $("#material-list");
+  // File health can change without replacing an excerpt someone is editing.
+  const currentSources = new Map(
+    state.materials.map((source) => [String(source.id), source]),
+  );
+  for (const box of list.querySelectorAll("article[data-source-id]")) {
+    const source = currentSources.get(box.dataset.sourceId);
+    if (source) updateMaterialWarning(box, source);
+  }
   if (
     list.contains(document.activeElement) ||
     [...list.querySelectorAll("form")].some((form) => dirtyForms.has(form))
@@ -3658,6 +3687,7 @@ function renderMaterials() {
   }
   for (const source of state.materials) {
     const box = el("article", undefined, "section");
+    box.dataset.sourceId = source.id;
     box.append(
       el("h2", source.original_name),
       el(
@@ -3666,14 +3696,7 @@ function renderMaterials() {
         "subtle",
       ),
     );
-    if (source.original_available === false)
-      box.append(
-        el(
-          "p",
-          "The original file is missing, unreadable or has permissions that need repair. Re-upload the matching original with the same document purpose to repair it. Your reviewed excerpt is still saved.",
-          "source-file-warning",
-        ),
-      );
+    updateMaterialWarning(box, source);
     const form = el("form", undefined, "material-review");
     const textLabel = el("label", "Reviewed excerpt");
     const text = el("textarea");
@@ -3741,7 +3764,7 @@ function renderMaterials() {
           confirmed: approved.checked,
         });
         saved(form);
-        document.activeElement.blur();
+        blurForm(form);
         await refresh();
         note(
           result.changed === false
@@ -3851,7 +3874,7 @@ $("#mail-settings-form").onsubmit = async (event) => {
       gmail_verification: form.elements.gmail_verification.checked,
     });
     saved(form);
-    document.activeElement.blur();
+    blurForm(form);
     await refresh();
     note("Email preferences saved.");
   } catch (error) {
@@ -4109,7 +4132,7 @@ $("#provider-form").onsubmit = async (event) => {
       deployment: form.elements.deployment.value,
     });
     saved(form);
-    document.activeElement.blur();
+    blurForm(form);
     await refresh();
     note("Connection saved. Check login before starting.");
   } catch (error) {
@@ -4252,27 +4275,66 @@ document.addEventListener(
   "submit",
   (event) => {
     const form = event.target;
-    if (!form.onsubmit) return;
     if (form.dataset.saving === "true") {
       event.preventDefault();
       event.stopImmediatePropagation();
       return;
     }
+    if (!form.onsubmit) return;
     const handler = form.onsubmit;
+    const origin = document.activeElement;
+    const originalInert = form.inert;
+    const originalBusy = form.getAttribute("aria-busy");
+    const originView = view;
+    const controls = [...form.elements].filter(
+      (control) => "disabled" in control,
+    );
+    const previous = controls.map((control) => control.disabled);
+    const progress = el("p", "Working…", "help form-request-status");
+    progress.setAttribute("role", "status");
     form.onsubmit = null;
     event.preventDefault();
     form.dataset.saving = "true";
-    const buttons = [
-      ...form.querySelectorAll('button[type="submit"],button:not([type])'),
-    ];
-    const previous = buttons.map((button) => button.disabled);
-    buttons.forEach((button) => (button.disabled = true));
-    Promise.resolve(handler.call(form, event))
+    form.setAttribute("aria-busy", "true");
+    form.after(progress);
+    // Let the handler capture FormData before disabling controls. Inert also
+    // prevents background readiness rendering from reopening a field mid-save.
+    let request;
+    try {
+      request = handler.call(form, event);
+    } catch (error) {
+      request = Promise.reject(error);
+    }
+    form.inert = true;
+    controls.forEach((control) => (control.disabled = true));
+    Promise.resolve(request)
       .catch((error) => note(error.message, true))
       .finally(() => {
-        buttons.forEach((button, index) => (button.disabled = previous[index]));
+        controls.forEach(
+          (control, index) => (control.disabled = previous[index]),
+        );
+        form.inert = originalInert;
+        if (originalBusy === null) form.removeAttribute("aria-busy");
+        else form.setAttribute("aria-busy", originalBusy);
+        progress.remove();
         delete form.dataset.saving;
         form.onsubmit = handler;
+        if (state) render();
+        if (originView === view && document.activeElement === document.body) {
+          let target = origin?.isConnected
+            ? origin
+            : origin?.name
+              ? form.elements.namedItem(origin.name)
+              : null;
+          if (
+            !target?.isConnected ||
+            target.disabled ||
+            !target.getClientRects().length
+          )
+            target = $("#heading");
+          if (target === $("#heading")) target.tabIndex = -1;
+          target.focus({ preventScroll: true });
+        }
       });
   },
   true,
