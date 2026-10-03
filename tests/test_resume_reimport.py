@@ -91,3 +91,57 @@ def test_fact_changes_clear_prepared_labels_but_preserve_manual_holds(store,job,
     store.prepare(job,fresh);store.block(job['id'],'company_blocked')
     store.put_facts({'phone':'5557654322'})
     assert store.db.execute('SELECT status FROM jobs WHERE id=?',(job['id'],)).fetchone()[0]=='blocked'
+
+
+def test_import_parses_the_captured_bytes_when_the_input_changes(store,tmp_path,monkeypatch):
+    from hireme import onboarding
+    source=resume_pdf(tmp_path/'source.pdf',['Test Person','Original synthetic resume.'])
+    original=source.read_bytes()
+    replacement=resume_pdf(tmp_path/'replacement.pdf',['Another Person','Replacement synthetic resume.']).read_bytes()
+    read=onboarding._read_pdf_bytes
+    def changing(path):
+        captured=read(path);path.write_bytes(replacement);return captured
+    monkeypatch.setattr(onboarding,'_read_pdf_bytes',changing)
+    result=import_resume(store,source)
+    assert result['candidates']['full_name']=='Test Person' and 'Original synthetic resume' in result['text']
+    assert (store.root/'documents'/(result['hash']+'.pdf')).read_bytes()==original
+
+
+@pytest.mark.parametrize('state',['confirmed','unknown','awaiting_verification'])
+def test_matching_pdf_import_repairs_corruption_without_changing_past_records(store,job,package,tmp_path,state):
+    path=resume_pdf(tmp_path/'original.pdf',['Test Person','Synthetic original resume.'])
+    first=import_resume(store,path)
+    document=dict(store.db.execute("SELECT * FROM documents WHERE kind='resume'").fetchone())
+    aid=store.prepare(job,{**package,'documents':[{**document,'field':package['documents'][0]['field']}]})
+    store.begin_submit(aid);store.finish(aid,state)
+    attempted=dict(store.db.execute('SELECT * FROM applications WHERE id=?',(aid,)).fetchone());facts=store.facts()
+    stored=store.root/'documents'/(first['hash']+'.pdf');stored.write_bytes(b'Synthetic corrupted bytes')
+    assert not store.document_available('resume')
+    repaired=import_resume(store,path)
+    assert repaired['repaired'] and stored.read_bytes()==path.read_bytes()
+    assert store.document_available('resume') and store.facts()==facts
+    assert dict(store.db.execute('SELECT * FROM applications WHERE id=?',(aid,)).fetchone())==attempted
+    assert store.db.execute("SELECT count(*) FROM events WHERE kind='document_repaired'").fetchone()[0]==1
+
+
+def test_import_does_not_repair_a_linked_destination_and_rejects_oversized_input(store,tmp_path):
+    source=resume_pdf(tmp_path/'source.pdf',['Test Person','Synthetic resume.'])
+    result=import_resume(store,source);stored=store.root/'documents'/(result['hash']+'.pdf')
+    outside=tmp_path/'outside.pdf';outside.write_bytes(source.read_bytes());stored.unlink();stored.symlink_to(outside)
+    with pytest.raises(ValueError,match='Unsafe imported PDF destination'):import_resume(store,source)
+    assert outside.read_bytes()==source.read_bytes()
+    large=tmp_path/'large.pdf'
+    with large.open('wb') as output:
+        output.write(b'%PDF-');output.truncate(21*1024*1024)
+    with pytest.raises(ValueError,match='exceeds 20 MiB'):import_resume(store,large)
+
+
+def test_matching_pdf_import_repairs_unreadable_file_permissions(store,tmp_path):
+    source=resume_pdf(tmp_path/'source.pdf',['Test Person','Synthetic resume.'])
+    result=import_resume(store,source);stored=store.root/'documents'/(result['hash']+'.pdf')
+    stored.chmod(0)
+    try:
+        assert not store.document_available('resume')
+        assert import_resume(store,source)['repaired']
+        assert store.document_available('resume') and stored.stat().st_mode & 0o777==0o600
+    finally:stored.chmod(0o600)

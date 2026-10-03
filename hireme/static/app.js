@@ -2105,16 +2105,23 @@ $("#facts-form").onsubmit = async (e) => {
   }
 };
 $("#resume-upload").onchange = async (e) => {
-  const f = e.target.files[0];
+  const input = e.target,
+    f = input.files[0];
   if (!f) return;
+  input.disabled = true;
   try {
-    await api("/api/resume", f, true);
+    const result = await api("/api/resume", f, true);
     note(
-      "Resume imported. Confirm any new or changed extracted values and supply the remaining facts.",
+      result.repaired
+        ? "Stored resume PDF repaired from your matching upload. Confirm any new or changed extracted values."
+        : "Resume imported. Confirm any new or changed extracted values and supply the remaining facts.",
     );
     await refresh();
   } catch (e) {
     note(e.message, true);
+  } finally {
+    input.disabled = false;
+    input.value = "";
   }
 };
 $("#settings-form").onsubmit = async (event) => {
@@ -2499,9 +2506,11 @@ $("#transcript-upload").onchange = async (e) => {
   if (!f) return;
   input.disabled = true;
   try {
-    await api("/api/transcript", f, true);
+    const result = await api("/api/transcript", f, true);
     note(
-      "Transcript saved. Matching applications can upload it automatically in the next cycle.",
+      result.repaired
+        ? "Stored transcript PDF repaired from your matching upload and selected for future uploads."
+        : "Transcript saved. Matching applications can upload it automatically in the next cycle.",
     );
     await refresh();
   } catch (error) {

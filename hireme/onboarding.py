@@ -1,22 +1,65 @@
 from __future__ import annotations
 
 import hashlib
+import io
 import os
 import re
+import stat
+import tempfile
 from pathlib import Path
 
 from .config import FACTS, validate_fact
 from .util import private_dir,write_private_blob
 
+MAX_PDF_BYTES=20*1024*1024
+
+
+def _read_pdf_bytes(path):
+    if path.is_symlink() or not path.is_file():raise ValueError('Choose a regular PDF')
+    try:
+        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+        with os.fdopen(fd,'rb') as source:
+            if not stat.S_ISREG(os.fstat(source.fileno()).st_mode):raise ValueError('Choose a regular PDF')
+            data=source.read(MAX_PDF_BYTES+1)
+    except OSError:raise ValueError('Choose a readable regular PDF') from None
+    if len(data)>MAX_PDF_BYTES:raise ValueError('PDF exceeds 20 MiB')
+    return data
+
+
+def _store_imported_pdf(path,data):
+    """An explicit import can restore the bytes belonging to a hash-named PDF."""
+    if path.name!=hashlib.sha256(data).hexdigest()+'.pdf' or path.is_symlink():raise ValueError('Unsafe imported PDF destination')
+    if not path.exists():
+        write_private_blob(path,data);return False
+    try:
+        fd=os.open(path,os.O_RDONLY|os.O_NOFOLLOW|os.O_NONBLOCK)
+        with os.fdopen(fd,'rb') as existing:
+            if not stat.S_ISREG(os.fstat(existing.fileno()).st_mode):raise ValueError('Unsafe imported PDF destination')
+            if existing.read(MAX_PDF_BYTES+1)==data:return False
+    except PermissionError:
+        if path.is_symlink() or not path.is_file():raise ValueError('Unsafe imported PDF destination') from None
+    except OSError:raise ValueError('Stored PDF could not be checked') from None
+    # Valid hash-addressed content is never changed. The incoming bytes hash to
+    # this filename, so replacement repairs a corrupt artifact, including history.
+    fd,temporary=tempfile.mkstemp(dir=path.parent,prefix='.pdf-repair-')
+    try:
+        with os.fdopen(fd,'wb') as repaired:
+            repaired.write(data);repaired.flush();os.fsync(repaired.fileno())
+        if path.is_symlink():raise ValueError('Unsafe imported PDF destination')
+        os.replace(temporary,path)
+        directory_fd=os.open(path.parent,os.O_RDONLY)
+        try:os.fsync(directory_fd)
+        finally:os.close(directory_fd)
+    finally:Path(temporary).unlink(missing_ok=True)
+    return True
+
 
 def import_resume(store,path:Path,kind='resume'):
     if kind not in ('resume','transcript'):raise ValueError('Unsupported document kind')
-    if path.is_symlink() or not path.is_file():raise ValueError('Choose a regular PDF')
-    if path.stat().st_size>20*1024*1024:raise ValueError('PDF exceeds 20 MiB')
-    data=path.read_bytes()
+    data=_read_pdf_bytes(path)
     if not data.startswith(b'%PDF-'):raise ValueError('Not a PDF')
     from pypdf import PdfReader
-    reader=PdfReader(path)
+    reader=PdfReader(io.BytesIO(data))
     if reader.is_encrypted or len(reader.pages)>50:raise ValueError('Encrypted or excessive PDF')
     parts=[];length=0
     for page in reader.pages:
@@ -66,17 +109,18 @@ def import_resume(store,path:Path,kind='resume'):
         # require review; identity rejection precedes selecting the new PDF.
         if proposals:store.put_facts(proposals,source='resume:'+h,confirmed=False)
         dest=private_dir(store.root/'documents')/(h+'.pdf')
-        write_private_blob(dest,data)
+        repaired=_store_imported_pdf(dest,data)
         previous=store.db.execute('SELECT hash FROM documents WHERE kind=?',(kind,)).fetchone()
         if previous and previous['hash']!=h:
             from .document_controls import invalidate_document_drafts
             invalidate_document_drafts(store,kind)
         store.db.execute('INSERT INTO documents VALUES(?,?,?) ON CONFLICT(kind) DO UPDATE SET hash=excluded.hash,filename=excluded.filename',(kind,h,dest.name))
         store.event('document_imported',kind,{'hash':h})
+        if repaired:store.event('document_repaired',kind,{'hash':h})
     if proposals:store.export_config()
     if kind=='resume':
         p.write_text(text);os.chmod(p,0o600)
-    return {'hash':h,'candidates':candidates,'text':text}
+    return {'hash':h,'candidates':candidates,'text':text,'repaired':repaired}
 
 
 def model_candidates(store,provider):

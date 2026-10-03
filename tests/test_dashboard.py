@@ -687,6 +687,17 @@ def test_dashboard_detects_missing_resume_and_reimport_preserves_fact_drafts(sto
             expect(page.locator('#facts-form [name="full_name"]')).to_have_value('Unsaved synthetic name')
             assert store.document_available('resume') and not store.missing_setup()
             assert store.facts()['full_name']['value']=='Test Person' and store.settings()['live_enabled']
+            selected=store.db.execute("SELECT filename FROM documents WHERE kind='resume'").fetchone()[0]
+            (store.root/'documents'/selected).write_bytes(b'Synthetic corrupted PDF')
+            page.evaluate('refresh()')
+            expect(page.locator('#resume-state')).to_contain_text('saved resume file is unavailable')
+            page.locator('#resume-upload').set_input_files(str(replacement))
+            expect(page.locator('#notice')).to_contain_text('Stored resume PDF repaired from your matching upload')
+            expect(page.locator('#resume-state')).to_contain_text('Resume imported and stored privately')
+            expect(page.locator('#resume-upload')).to_have_value('')
+            expect(page.locator('#run')).to_be_enabled()
+            expect(page.locator('#facts-form [name="full_name"]')).to_have_value('Unsaved synthetic name')
+            assert (store.root/'documents'/selected).read_bytes()==replacement.read_bytes()
             assert not store.db.execute('SELECT * FROM applications').fetchone()
             assert not store.db.execute('SELECT * FROM model_requests').fetchone()
             assert not errors and page.evaluate('document.documentElement.scrollWidth<=innerWidth')

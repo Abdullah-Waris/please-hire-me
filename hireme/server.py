@@ -240,7 +240,7 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                         from .onboarding import import_resume
                         with tempfile.NamedTemporaryFile(suffix='.pdf',dir=root) as f:
                             f.write(raw);f.flush();result=import_resume(store,Path(f.name),'transcript' if path=='/api/transcript' else 'resume')
-                        return self.send(200,{'hash':result['hash'],'candidates':result['candidates']})
+                        return self.send(200,{'hash':result['hash'],'candidates':result['candidates'],'repaired':result['repaired']})
                     if path=='/api/gmail-client':
                         import tempfile
                         from .gmail import import_client
