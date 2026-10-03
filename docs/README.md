@@ -20,7 +20,7 @@ The `hireme/` package stays flat so existing imports and command wrappers remain
 | Responsibility | Modules |
 | --- | --- |
 | Entry points and local desk | `cli.py`, `server.py`, `setup_status.py`, `demo.py`, `doctor.py`, `recovery.py`, `ledger.py`, `presentation.py`, `static/` |
-| Applicant documents and writing | `onboarding.py`, `materials.py`, `letters.py`, `answers.py` |
+| Applicant documents and writing | `onboarding.py`, `materials.py`, `letters.py`, `answers.py`, `saved_answers.py` |
 | Inference and credentials | `provider.py`, `connections.py` |
 | Employer accounts and encrypted transfer | `accounts.py`, `account_transfer.py` |
 | Application execution | `worker.py`, `browser.py`, `policy.py` |

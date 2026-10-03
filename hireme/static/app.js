@@ -1,10 +1,12 @@
 "use strict";
 let materialOffset = 0;
-const token =
-  new URLSearchParams(location.hash.slice(1)).get("token") ||
-  sessionStorage.getItem("hireme-token") ||
-  "";
-if (token) sessionStorage.setItem("hireme-token", token);
+let token = new URLSearchParams(location.hash.slice(1)).get("token") || "";
+try {
+  token ||= sessionStorage.getItem("hireme-token") || "";
+  if (token) sessionStorage.setItem("hireme-token", token);
+} catch {
+  // Restricted browser storage must not prevent a freshly opened dashboard from working.
+}
 history.replaceState(null, "", location.pathname);
 let state = null,
   view = "today";
@@ -1277,6 +1279,107 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refresh();
 });
 $("#retry-connection").onclick = refresh;
+
+let answerOffset = 0,
+  answerRequest = 0,
+  answerTimer;
+async function loadSavedAnswers(reset = false, focus = false) {
+  if (!state) {
+    await (refreshing || refresh());
+    if (!state) return;
+  }
+  if (reset) answerOffset = 0;
+  const request = ++answerRequest;
+  const parent = $("#saved-answers");
+  parent.setAttribute("aria-busy", "true");
+  try {
+    const query = new URLSearchParams({
+      search: $("#answer-search").value,
+      offset: answerOffset,
+    });
+    const result = await api(`/api/saved-answers?${query}`);
+    if (request !== answerRequest) return;
+    answerOffset = result.offset;
+    parent.replaceChildren();
+    if (!result.answers.length)
+      empty(
+        parent,
+        $("#answer-search").value.trim()
+          ? "No saved answers match your search."
+          : "No exact answers saved yet. Questions that need your input appear in Needs you.",
+      );
+    for (const answer of result.answers) {
+      const details = el("details", undefined, "saved-template");
+      details.append(
+        el("summary", answer.question),
+        el(
+          "p",
+          answer.host.includes("|")
+            ? `Employer: ${answer.host.split("|").slice(1).join("|")} · ${answer.host.split("|")[0]}`
+            : `Form host: ${answer.host}`,
+          "help",
+        ),
+        el("p", answer.value, "approved-body"),
+      );
+      if (answer.fact_key)
+        details.append(
+          el(
+            "p",
+            `Linked to confirmed fact: ${state.fact_labels[answer.fact_key] || answer.fact_key}`,
+            "help",
+          ),
+        );
+      const revoke = el("button", "Stop reusing this answer", "secondary");
+      revoke.type = "button";
+      revoke.disabled = state.demo;
+      revoke.onclick = async () => {
+        revoke.disabled = true;
+        try {
+          await api("/api/answer-revoke", { id: answer.id });
+          await loadSavedAnswers(false, true);
+          await refresh();
+          note(
+            "Saved answer withdrawn. The worker will ask again if confirmed sources cannot answer the question. Past application evidence stays recorded.",
+          );
+        } catch (error) {
+          note(error.message, true);
+          revoke.disabled = state.demo;
+        }
+      };
+      details.append(revoke);
+      parent.append(details);
+    }
+    $("#answers-page").textContent = result.total
+      ? `${result.offset + 1}–${result.offset + result.answers.length} of ${result.total} saved answers`
+      : "0 saved answers";
+    $("#answers-previous").disabled = result.offset === 0;
+    $("#answers-next").disabled =
+      result.offset + result.answers.length >= result.total;
+    if (focus) {
+      parent.tabIndex = -1;
+      parent.focus({ preventScroll: true });
+    }
+  } catch (error) {
+    if (request === answerRequest) note(error.message, true);
+  } finally {
+    if (request === answerRequest) parent.removeAttribute("aria-busy");
+  }
+}
+$("#saved-answers-panel").ontoggle = () => {
+  if ($("#saved-answers-panel").open) loadSavedAnswers();
+};
+$("#answer-search").oninput = () => {
+  clearTimeout(answerTimer);
+  answerTimer = setTimeout(() => loadSavedAnswers(true), 200);
+};
+$("#answers-previous").onclick = () => {
+  answerOffset = Math.max(0, answerOffset - 25);
+  loadSavedAnswers(false, true);
+};
+$("#answers-next").onclick = () => {
+  answerOffset += 25;
+  loadSavedAnswers(false, true);
+};
 
 $("#template-form").onsubmit = async (e) => {
   e.preventDefault();

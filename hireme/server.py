@@ -111,6 +111,12 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                             sort=query.get('sort',['recent'])[0],offset=int(query.get('offset',['0'])[0]))
                     except ValueError as error:return self.send(400,{'error':str(error)})
                     return self.send(200,result)
+                if path=='/api/saved-answers':
+                    from .saved_answers import list_answers
+                    query=parse_qs(urlsplit(self.path).query)
+                    try:result=list_answers(store,search=query.get('search',[''])[0],offset=int(query.get('offset',['0'])[0]))
+                    except ValueError as error:return self.send(400,{'error':str(error)})
+                    return self.send(200,result)
                 if path=='/api/export.csv':
                     from .ledger import export_csv
                     return self.send(200,export_csv(store),'text/csv; charset=utf-8',download='application-ledger.csv')
@@ -184,6 +190,9 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     elif path=='/api/reports/flush':
                         from .reports import flush_reports
                         result=flush_reports(store)
+                    elif path=='/api/answer-revoke':
+                        from .saved_answers import revoke_answer
+                        revoke_answer(store,data['id']);result={'revoked':True}
                     elif path=='/api/template':result={'id':store.put_template(data['category'],data['body'])}
                     elif path=='/api/template-edit':result={'id':store.edit_template(data['id'],data['category'],data['body'])}
                     elif path=='/api/template-revoke':store.revoke_template(data['id']);result={'revoked':True}

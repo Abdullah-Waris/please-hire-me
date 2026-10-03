@@ -46,6 +46,10 @@ def seed(store):
                     'value': 'This is a synthetic answer in the sample workspace.',
                     'provenance': {'template_id': 'demo'}}]}), 'demo', stamp, stamp, stamp,
                  'Synthetic confirmation — no application was sent.'))
+            if index == 0:
+                qid = store.ask(job['id'], job['host'] + '|' + store.company(company),
+                                'Which engineering track interests you?', ['Infrastructure', 'Product engineering'])
+                store.answer_question(qid, 'Product engineering')
         if status == 'blocked':
             store.db.execute('INSERT INTO questions VALUES(?,?,?,?,?,?,0)',
                              ('demo-question', job['id'], job['host'], 'Which engineering team interests you most?',
