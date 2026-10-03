@@ -614,6 +614,50 @@ def test_complete_source_health_search_pages_retry_and_mobile_layout(store):
     finally: process.terminate(); process.join(5)
 
 
+def test_saved_posting_dialog_checks_current_saved_preferences_without_writes(store,job):
+    from playwright.sync_api import sync_playwright,expect
+    store.update_settings({'live_enabled':False})
+    before=store.snapshot()
+    sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port));process.start()
+    base=f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try:urllib.request.urlopen(base).close();break
+            except OSError:time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch();page=browser.new_page(viewport={'width':320,'height':844});errors=[];checks=[]
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.on('request',lambda request:checks.append(request.url) if '/api/posting-check/' in request.url else None)
+            page.goto(base+'/#token=fixture-capability')
+            page.locator('[data-view="settings"]').click()
+            page.locator('#settings-form [name="locations"]').fill('London')
+            page.locator('[data-view="today"]').click()
+            page.locator('#jobs .opportunity-details').first.click()
+            assert not checks
+            assert page.request.get(base+'/api/posting-check/'+job['id']).status==403
+            page.locator('#check-saved-posting').click()
+            expect(page.locator('#posting-check-result')).to_contain_text('Matches your saved preferences')
+            assert store.snapshot()==before
+            page.route('**/api/posting-check/*',lambda route:route.fulfill(status=503,json={'error':'Synthetic posting check unavailable'}))
+            page.locator('#check-saved-posting').click()
+            expect(page.locator('#posting-check-result')).to_contain_text('Synthetic posting check unavailable')
+            page.unroute('**/api/posting-check/*')
+            store.update_settings({'locations':['London']})
+            page.locator('#check-saved-posting').click()
+            expect(page.locator('#posting-check-result')).to_contain_text('Outside your chosen locations')
+            assert not store.db.execute('SELECT * FROM applications').fetchone()
+            assert not store.db.execute('SELECT * FROM model_requests').fetchone()
+            assert not store.settings()['live_enabled']
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            page.keyboard.press('Escape')
+            page.locator('[data-view="settings"]').click()
+            expect(page.locator('#settings-form [name="locations"]')).to_have_value('London')
+            assert not errors
+            browser.close()
+    finally:process.terminate();process.join(5)
+
+
 def test_dashboard_capability_csrf_host_and_xss(tmp_path):
     sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
     process=multiprocessing.Process(target=launch,args=(str(tmp_path/'private'),str(Path(__file__).parent.parent),port))

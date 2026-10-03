@@ -13,6 +13,7 @@ let state = null,
 let refreshing = null;
 let backupBusy = false;
 let transcriptWithdrawalBusy = false;
+let postingCheckRequest = 0;
 let renderedAccountSignature = null;
 let aliasJsonMode = false;
 let renderedBlockedSignature = null;
@@ -3155,6 +3156,11 @@ function openOpportunity(job) {
   const payload = jobPayload(job),
     dialog = $("#job-dialog");
   dialog.dataset.jobId = job.id;
+  postingCheckRequest++;
+  $("#check-saved-posting").disabled = false;
+  $("#check-saved-posting").textContent = "Check saved posting";
+  $("#posting-check-result").hidden = true;
+  $("#posting-check-result").replaceChildren();
   dialog.dataset.companySkipped = String(job.company_skipped);
   const unsavedPreferences = dirtyForms.has($("#settings-form"));
   $("#skip-job-company").disabled = state.demo || unsavedPreferences;
@@ -3213,6 +3219,48 @@ function openOpportunity(job) {
   document.body.classList.add("dialog-open");
   dialog.showModal();
 }
+$("#check-saved-posting").onclick = async () => {
+  const dialog = $("#job-dialog"),
+    id = dialog.dataset.jobId,
+    request = ++postingCheckRequest;
+  const button = $("#check-saved-posting"),
+    result = $("#posting-check-result");
+  button.disabled = true;
+  button.textContent = "Checking saved posting…";
+  result.hidden = true;
+  try {
+    const check = await api("/api/posting-check/" + encodeURIComponent(id));
+    if (
+      request !== postingCheckRequest ||
+      dialog.dataset.jobId !== id ||
+      !dialog.open
+    )
+      return;
+    result.replaceChildren(el("strong", check.label), el("p", check.detail));
+    if (check.score !== null && check.score !== undefined)
+      result.append(
+        el("p", `Current saved-posting fit: ${check.score}/100`, "help"),
+      );
+    result.hidden = false;
+  } catch (error) {
+    if (
+      request !== postingCheckRequest ||
+      dialog.dataset.jobId !== id ||
+      !dialog.open
+    )
+      return;
+    result.replaceChildren(
+      el("strong", "Could not check this posting"),
+      el("p", error.message),
+    );
+    result.hidden = false;
+  } finally {
+    if (request === postingCheckRequest) {
+      button.disabled = false;
+      button.textContent = "Check saved posting";
+    }
+  }
+};
 $("#close-job-dialog").onclick = () => $("#job-dialog").close();
 $("#skip-job-company").onclick = async (event) => {
   event.target.disabled = true;

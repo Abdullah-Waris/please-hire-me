@@ -199,6 +199,11 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     except ValueError as error:return self.send(400,{'error':str(error)})
                     if not record:return self.send(404,{'error':'Application record not found'})
                     return self.send(200,{'application':record})
+                if path.startswith('/api/posting-check/'):
+                    from .posting_check import check_saved_posting
+                    try:result=check_saved_posting(store,unquote(path[len('/api/posting-check/'):]))
+                    except ValueError as error:return self.send(400,{'error':str(error)})
+                    return self.send(200,result)
                 if path=='/api/schedule':
                     if demo:return self.send(200,{'installed':False,'demo':True})
                     from .scheduler import status
