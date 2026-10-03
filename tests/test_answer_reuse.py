@@ -284,6 +284,15 @@ def test_no_ai_application_question_still_requires_human(store,job):
         resolve(store,job['host'],field("Tell me about the most exciting project you've built (please type answer without AI)"))
 
 
+def test_relocation_need_uses_current_location_not_willingness(store,job):
+    store.update_settings({'contextual_preferences':True})
+    store.put_facts({'location':'Berkeley, CA','relocate':'Yes'})
+    question=field('Do you require relocation to the SF Bay Area?','radio',['Yes','No'])
+    assert resolve(store,job['host'],question,context=job)['value']=='No'
+    store.put_facts({'location':'Boston, MA'})
+    with pytest.raises(Blocked):resolve(store,job['host'],question,context=job)
+
+
 def test_tailored_answers_can_use_resume_without_separate_templates_and_revalidate_hash(store,job):
     from reportlab.pdfgen import canvas
     import io,hashlib

@@ -142,6 +142,11 @@ def _context_preference(store, label, options, context):
         index=1 if 'second choice' in low else 0
         if len(scores)>index:
             value=scores[index][1];evidence={'skills_revision':facts['skills']['revision'],'rank':index+1}
+    elif re.search(r'(?:require|need).*relocation.*(?:sf|san francisco|bay area)',low):
+        location=facts.get('location',{})
+        if re.search(r'\b(?:Berkeley|San Francisco|Bay Area)\b',location.get('value',''),re.I):
+            no=[x for x in options if x.casefold()=='no']
+            if len(no)==1:value=no[0];evidence={'location_revision':location['revision'],'already_in_bay_area':True}
     elif re.search(r'(?:select|choose).*(?:location).*(?:work)|location.*(?:select|choose).*(?:work)|(?:office|location).*(?:prefer|work|based)|(?:prefer|work).*(?:office|location)|which office.*applying|^san francisco hq',low):
         if facts.get('onsite',{}).get('value')=='Yes' and re.search(r'Berkeley|San Francisco|Bay Area',facts.get('location',{}).get('value',''),re.I):
             local=[x for x in options if re.search(r'San Francisco|Bay Area|Berkeley',x,re.I)]
