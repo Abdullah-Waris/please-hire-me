@@ -1392,12 +1392,22 @@
               unknown answers always take priority. Use “hireme login URL” in a
               terminal to sign into a dedicated portal session.
             </p>
-            <button type="submit">Save preferences</button
-            ><span
-              class="draft-status"
-              data-draft-for="settings-form"
-              role="status"
-            ></span>
+            <div class="preferences-savebar">
+              <button type="submit">Save preferences</button>
+              <button
+                type="button"
+                id="discard-preferences"
+                class="secondary"
+                disabled
+              >
+                Discard changes
+              </button>
+              <span
+                class="draft-status"
+                data-draft-for="settings-form"
+                role="status"
+              ></span>
+            </div>
           </form>
           <div class="section">
             <h2>Automatic batch schedule</h2>

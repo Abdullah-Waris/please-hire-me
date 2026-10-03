@@ -68,9 +68,13 @@ const expandedEvidence = new Set(),
   evidenceImages = new Map();
 document.addEventListener("input", (event) => {
   if (event.target.form) dirtyForms.add(event.target.form);
+  if (event.target.form?.id === "settings-form")
+    updatePreferenceDraftControls();
 });
 document.addEventListener("change", (event) => {
   if (event.target.form) dirtyForms.add(event.target.form);
+  if (event.target.form?.id === "settings-form")
+    updatePreferenceDraftControls();
 });
 function editing(selector) {
   const form = $(selector);
@@ -80,12 +84,29 @@ function editing(selector) {
     dirtyForms.has(form)
   );
 }
+function updatePreferenceDraftControls() {
+  const form = $("#settings-form");
+  $("#discard-preferences").disabled =
+    !state ||
+    state.demo ||
+    form.dataset.saving === "true" ||
+    !dirtyForms.has(form);
+}
+window.addEventListener("beforeunload", (event) => {
+  const unfinished = [$("#facts-form"), $("#settings-form")].some(
+    (form) => dirtyForms.has(form) || form.dataset.saving === "true",
+  );
+  if (!unfinished) return;
+  event.preventDefault();
+  event.returnValue = "";
+});
 function blurForm(form) {
   if (form.contains(document.activeElement)) document.activeElement.blur();
 }
 function saved(form) {
   if (!form) return;
   dirtyForms.delete(form);
+  if (form.id === "settings-form") updatePreferenceDraftControls();
   if (form.id) {
     const indicator = document.querySelector(`[data-draft-for="${form.id}"]`);
     if (indicator) indicator.textContent = "";
@@ -2362,6 +2383,7 @@ function renderSettings() {
             : v;
   }
   renderAliasRows(state.settings.company_aliases);
+  updatePreferenceDraftControls();
 }
 
 function addAliasRow(other = "", main = "", focus = false) {
@@ -2871,6 +2893,7 @@ function render() {
   renderDocumentStatus();
   if (!editing("#facts-form")) renderFacts();
   if (!editing("#settings-form")) renderSettings();
+  updatePreferenceDraftControls();
   renderRuns();
   if ($("#source-health-panel").open) loadSourceHealth();
   show(view);
@@ -2964,6 +2987,26 @@ $("#resume-upload").onchange = async (e) => {
     input.value = "";
     updateSelectedDownloads();
   }
+};
+$("#settings-form").addEventListener("focusin", (event) => {
+  const target = event.target;
+  if (target.closest(".preferences-savebar")) return;
+  requestAnimationFrame(() => {
+    if (document.activeElement !== target || view !== "settings") return;
+    const field = target.getBoundingClientRect();
+    const bar = $(".preferences-savebar").getBoundingClientRect();
+    if (field.bottom > bar.top - 16 && field.top < bar.bottom)
+      target.scrollIntoView({ block: "center", behavior: "instant" });
+  });
+});
+$("#discard-preferences").onclick = () => {
+  const form = $("#settings-form");
+  if (!state || state.demo || form.dataset.saving === "true") return;
+  saved(form);
+  renderSettings();
+  updateScheduleControls();
+  form.querySelector('button[type="submit"]').focus({ preventScroll: true });
+  note("Unsaved preferences discarded. Your saved preferences are unchanged.");
 };
 $("#settings-form").onsubmit = async (event) => {
   event.preventDefault();

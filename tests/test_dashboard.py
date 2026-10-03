@@ -2250,3 +2250,59 @@ def test_fact_form_capture_survives_pending_lock_and_restores_editable_confirmed
             assert not errors and not store.db.execute('SELECT * FROM model_requests').fetchone()
             browser.close()
     finally:process.terminate();process.join(5)
+
+
+def test_preferences_savebar_discards_locally_and_warns_before_losing_drafts(store):
+    from playwright.sync_api import sync_playwright,expect
+    sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port));process.start()
+    base=f'http://127.0.0.1:{port}';before=store.settings()
+    try:
+        for _ in range(50):
+            try:urllib.request.urlopen(base).close();break
+            except OSError:time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch();page=browser.new_page(viewport={'width':320,'height':844})
+            posts=[];dialogs=[];errors=[]
+            page.on('request',lambda request:posts.append(request.url) if request.method=='POST' else None)
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.on('dialog',lambda dialog:(dialogs.append(dialog.type),dialog.dismiss()))
+            page.goto(base+'/#token=fixture-capability');page.locator('[data-view=settings]').click()
+            field=page.locator('#settings-form [name=locations]');discard=page.locator('#discard-preferences')
+            expect(discard).to_be_disabled()
+            field.fill('Unsaved private location')
+            expect(discard).to_be_enabled()
+            for width in (320,390,1440):
+                page.set_viewport_size({'width':width,'height':844});field.scroll_into_view_if_needed()
+                box=page.locator('.preferences-savebar').bounding_box()
+                assert box and box['y']>=0 and box['y']+box['height']<=844
+                assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+                field.focus();page.keyboard.press('Tab')
+                page.wait_for_function("""()=>{const e=document.activeElement,r=e.getBoundingClientRect();const hit=document.elementFromPoint(r.x+r.width/2,r.y+r.height/2);return !!hit&&(hit===e||e.contains(hit))}""")
+            page.evaluate('location.reload()')
+            expect(field).to_have_value('Unsaved private location')
+            assert dialogs==['beforeunload']
+            page.locator('[data-view=today]').click()
+            assert page.evaluate("(()=>{const e=new Event('beforeunload',{cancelable:true});window.dispatchEvent(e);return e.defaultPrevented})()")
+            page.locator('[data-view=settings]').click();page.locator('#alias-json-toggle').click()
+            page.locator('#alias-json-field textarea').fill('{invalid alias draft')
+            discard.click()
+            expect(field).to_have_value('\n'.join(before['locations']))
+            expect(page.locator('#alias-json-field textarea')).to_have_value(json.dumps(before['company_aliases'],indent=2))
+            expect(discard).to_be_disabled()
+            expect(page.get_by_role('button',name='Save preferences',exact=True)).to_be_focused()
+            expect(page.locator('[data-draft-for=settings-form]')).to_be_empty()
+            assert not posts and store.settings()==before
+            assert not page.evaluate("(()=>{const e=new Event('beforeunload',{cancelable:true});window.dispatchEvent(e);return e.defaultPrevented})()")
+            field.fill('Saved synthetic location')
+            page.get_by_role('button',name='Save preferences',exact=True).click()
+            expect(page.locator('#settings-form')).not_to_have_attribute('data-saving','true')
+            expect(discard).to_be_disabled()
+            page.reload();expect(page.locator('#worker-state')).to_have_text('Automatic submissions enabled' if before['live_enabled'] else 'Submissions paused')
+            assert dialogs==['beforeunload'] and store.settings()['locations']==['Saved synthetic location']
+            page.locator('[data-view=profile]').click();page.locator('#facts-form [name=first_name]').fill('Private unsaved first name')
+            page.evaluate('location.reload()')
+            expect(page.locator('#facts-form [name=first_name]')).to_have_value('Private unsaved first name')
+            assert dialogs==['beforeunload','beforeunload'] and not errors
+            browser.close()
+    finally:process.terminate();process.join(5)

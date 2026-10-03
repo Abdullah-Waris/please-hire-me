@@ -1866,3 +1866,41 @@ pre {
     grid-template-columns: minmax(0, 1fr);
   }
 }
+
+.preferences-savebar {
+  position: sticky;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  margin-top: 18px;
+  padding: 12px;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: var(--surface);
+  box-shadow: 0 6px 24px #1c2b401a;
+}
+.preferences-savebar button {
+  margin: 0;
+}
+.preferences-savebar .draft-status {
+  margin: 0;
+}
+#settings-form :is(input, textarea, select) {
+  scroll-margin-block: 24px 150px;
+}
+@media (max-width: 600px) {
+  .preferences-savebar {
+    gap: 8px;
+  }
+  .preferences-savebar button {
+    flex: 1;
+    padding: 10px 12px;
+    font-size: 13px;
+  }
+  .preferences-savebar .draft-status {
+    flex-basis: 100%;
+  }
+}
