@@ -61,6 +61,13 @@ CREATE TABLE IF NOT EXISTS sources (id TEXT PRIMARY KEY, status TEXT NOT NULL, c
  error TEXT NOT NULL DEFAULT '', payload TEXT NOT NULL DEFAULT '{}');
 CREATE TABLE IF NOT EXISTS runs (id TEXT PRIMARY KEY, started TEXT NOT NULL, finished TEXT,
  status TEXT NOT NULL, submitted INTEGER NOT NULL DEFAULT 0, detail TEXT NOT NULL DEFAULT '');
+CREATE INDEX IF NOT EXISTS applications_company_state ON applications(company_key,state);
+CREATE INDEX IF NOT EXISTS applications_state_attempted ON applications(state,attempted);
+CREATE INDEX IF NOT EXISTS jobs_recent ON jobs(first_seen DESC,id);
+CREATE INDEX IF NOT EXISTS jobs_fit ON jobs(score DESC,first_seen DESC,id);
+CREATE INDEX IF NOT EXISTS questions_unresolved_job ON questions(resolved,job_id);
+CREATE INDEX IF NOT EXISTS employer_accounts_state ON employer_accounts(state);
+CREATE INDEX IF NOT EXISTS runs_status_started ON runs(status,started);
 """
 
 
@@ -314,7 +321,7 @@ class Store:
         ck=self.company(job["company"])
         if ck in {self.company(x) for x in s["skip_companies"]+s["interview_companies"]}:
             raise Blocked("company_blocked")
-        active = list(self.db.execute("SELECT * FROM applications WHERE company_key=? AND state IN ('submitting','unknown','confirmed','awaiting_verification')",(ck,)))
+        active = list(self.db.execute("SELECT state,attempted,created FROM applications WHERE company_key=? AND state IN ('submitting','unknown','confirmed','awaiting_verification')",(ck,)))
         if any(r["state"]=="awaiting_verification" for r in active):
             raise Blocked("company_verification_pending","Complete the earlier application verification first")
         if any(r["state"] in ("submitting","unknown") for r in active):
@@ -322,7 +329,7 @@ class Store:
         if len(active)>=s["max_per_company"]:
             raise Blocked("company_limit")
         local_day=datetime.now(ZoneInfo(s["timezone"])).date()
-        all_active=list(self.db.execute("SELECT * FROM applications WHERE state IN ('submitting','unknown','confirmed','awaiting_verification')"))
+        all_active=self.db.execute("SELECT company_key,attempted,created FROM applications WHERE state IN ('submitting','unknown','confirmed','awaiting_verification')")
         daily=[r for r in all_active if datetime.fromisoformat(r["attempted"] or r["created"]).astimezone(ZoneInfo(s["timezone"])).date()==local_day]
         if len(daily)>=s["max_per_day"]:
             raise Blocked("daily_limit")
