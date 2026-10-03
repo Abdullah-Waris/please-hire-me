@@ -561,3 +561,19 @@ def test_ashby_attachment_requires_handle_from_approved_successful_upload(store,
         request=Request();status=200
         def json(self):return {'data':{'setFormValueToFile':{'id':'form'}}}
     b._upload_response(Response());assert 'approved' in b.ashby_attached_files
+
+
+def test_ashby_yesno_buttons_preserve_required_question_and_confirmed_answer(store,ats):
+    original=(Path(__file__).parent/'fixtures/application.html').read_text()
+    html=original.replace('</form>', '''<div class="ashby-application-form-field-entry">
+    <label class="ashby-application-form-question-title _required_test">Are you legally authorized to work in the United States?</label>
+    <div class="ashby-application-form-input-yesno">
+    <input type="checkbox" style="display:none" tabindex="-1">
+    <button type="button" class="ashby-application-form-input-yesno-option" aria-pressed="false">Yes</button>
+    <button type="button" class="ashby-application-form-input-yesno-option" aria-pressed="false">No</button>
+    </div></div><script>document.querySelectorAll('.ashby-application-form-input-yesno-option').forEach(e=>e.onclick=()=>{e.parentElement.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(x===e)))})</script></form>''')
+    with Browser(store,test_url=ats[0]) as b:
+        b.page.route(ats[0]+'/**',lambda r:r.fulfill(status=200,content_type='text/html',body=html) if r.request.method=='GET' else r.fallback())
+        assert b.apply(local_job(store,ats),live=False)=='prepared'
+        f=next(f for f in b._snapshot() if f['type']=='yesno')
+        assert f['required'] and f['value']=='Yes' and f['options']==['Yes','No']

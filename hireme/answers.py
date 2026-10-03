@@ -45,7 +45,7 @@ def field_key(label):
     if 'highest' in label and re.search(r'education|degree',label):return 'highest_completed_degree'
     if re.search(r'(?:will|do).*(?:require|need).*sponsor|(?:require|need).*employment visa',label):return 'needs_sponsorship'
     if re.search(r'(?:authorized|eligible|authorization).*(?:united states|u\.s\.|\bus\b)',label):return 'work_authorized_us'
-    if re.search(r'(?:open|willing|comfortable).*(?:in.person|on.site)|^i understand that this position requires me to work on.site',label):return 'onsite'
+    if re.search(r'(?:open|willing|comfortable).*(?:in.person|on.site|in office)|^i understand that this position requires me to work on.site',label):return 'onsite'
     return None
 
 
@@ -363,7 +363,7 @@ def resolve(store, host, field, provider=None, context=None):
             value=fact['value']
             if key=='gpa' and field.get('type')=='number' and '/' in value:value=value.split('/',1)[0].strip()
             provenance={'fact_key':key,'revision':fact['revision']}
-    if field.get('type') in ('radio','select','combobox','checkbox','checkbox-group') and options:
+    if field.get('type') in ('radio','select','combobox','checkbox','checkbox-group','yesno') and options:
         try:value=_option_value(key,value,options)
         except Blocked:raise Blocked('option_mismatch',label)
     if field.get('maxlength',-1)>0 and len(value)>field['maxlength']:raise Blocked('answer_too_long',label)

@@ -17,7 +17,7 @@ ASHBY_UPLOAD_HOST='ashbyhq-infra-prd-main-app-uploaded-files-us-east-1.s3.us-eas
 UPLOAD_HOSTS={ASHBY_UPLOAD_HOST,'grnhse-prod-jben-us-west-2.s3.us-west-2.amazonaws.com',
               'grnhse-prod-jben-us-east-1.s3.us-east-1.amazonaws.com',
               'grnhse-prod-jben-eu-west-1.s3.eu-west-1.amazonaws.com'}
-CONTROLS='input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select,[role=combobox]:not(input):not(select)'
+CONTROLS='input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select,[role=combobox]:not(input):not(select),button.ashby-application-form-input-yesno-option'
 SNAPSHOT=r"""selector => {
  const controls=Array.from(document.querySelectorAll(selector)); const out=[]; const seen=new Set();
  function labelText(n) {
@@ -36,6 +36,15 @@ SNAPSHOT=r"""selector => {
  }
  controls.forEach((el,index)=>{
   if(!el.getClientRects().length && el.type!=='file')return;
+  if(el.matches('.ashby-application-form-input-yesno-option')){
+   const group=el.closest('.ashby-application-form-input-yesno');
+   if(!group||seen.has(group))return;seen.add(group);
+   const entry=el.closest('.ashby-application-form-field-entry');
+   const heading=entry?.querySelector('.ashby-application-form-question-title');
+   const buttons=controls.filter(x=>x.matches('.ashby-application-form-input-yesno-option')&&x.closest('.ashby-application-form-input-yesno')===group);
+   out.push({index,indices:buttons.map(x=>controls.indexOf(x)),ref:reference(el),refs:buttons.map(reference),label:heading?.textContent.trim()||'',type:'yesno',options:buttons.map(x=>x.textContent.trim()),required:!!heading?.className.includes('_required_'),maxlength:-1,value:buttons.find(x=>x.getAttribute('aria-pressed')==='true')?.textContent.trim()||'',multiple:false});
+   return;
+  }
   if(el.disabled || el.closest('[aria-hidden=true]') || (el.readOnly && el.tabIndex<0))return;
   let type=el.tagName==='SELECT'?'select':el.tagName==='TEXTAREA'?'textarea':el.getAttribute('role')==='combobox'?'combobox':el.type||'text';
   let indices=[index]; let question=label(el); let options=[]; let value=el.value||'';
@@ -392,6 +401,7 @@ class Browser:
         f=answer['field']; value=answer['value']; controls=self.page.locator(CONTROLS)
         el=self._control(f)
         if f['type']=='select':el.select_option(label=value)
+        elif f['type']=='yesno':self._control(f,f['options'].index(value)).click()
         elif f['type']=='radio':self._control(f,f['options'].index(value)).check()
         elif f['type']=='checkbox-group':
             for i,option in enumerate(f['options']):self._control(f,i).set_checked(option==value)
@@ -420,6 +430,7 @@ class Browser:
             elif f['type']=='checkbox-group':
                 actual='; '.join(f['options'][i] for i in range(len(f['indices'])) if self._control(f,i).is_checked())
             elif f['type']=='checkbox':actual='Yes' if el.is_checked() else 'No'
+            elif f['type']=='yesno':actual=next((x['value'] for x in fresh if x['label']==f['label'] and x['type']=='yesno'),'')
             elif f['type']=='combobox':actual=next((x['value'] for x in fresh if x['label']==f['label'] and x['type']=='combobox'),'')
             else:actual=el.input_value()
             if a['provenance'].get('fact_key')=='phone':
