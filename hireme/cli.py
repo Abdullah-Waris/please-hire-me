@@ -152,7 +152,7 @@ def main(argv=None):
             else:print(json.dumps(scheduler.status(store)))
         elif args.command=='duplicate':
             ck=store.company(args.company)
-            rows=[dict(r) for r in store.db.execute("SELECT id,state,created,attempted FROM applications WHERE company_key=?",(ck,))]
+            rows=[{key:r[key] for key in ('id','state','created','attempted')} for r in store.application_history() if ck in r['company_keys']]
             blocked=ck in {store.company(x) for x in store.settings()['skip_companies']+store.settings()['interview_companies']}
             print(json.dumps({'company':ck,'blocked':blocked,'applications':rows}))
             return 3 if blocked else 1 if rows else 0

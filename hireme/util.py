@@ -30,6 +30,14 @@ def company_key(value: str) -> str:
     return re.sub(r"[^a-z0-9]", "", value.casefold())
 
 
+def company_normalizer(aliases):
+    mapping = {company_key(key): company_key(value) for key, value in aliases.items()}
+    def normalize(value):
+        key = company_key(value)
+        return mapping.get(key, key)
+    return normalize
+
+
 def private_dir(path: Path) -> Path:
     if path.is_symlink():
         raise ValueError("Private storage must not be a symlink")

@@ -11,7 +11,7 @@ from pathlib import Path
 from zoneinfo import ZoneInfo
 
 from .config import DEFAULTS, FACTS, REQUIRED, validate_fact, validate_settings
-from .util import Blocked, atomic_json, company_key, digest, now, private_dir
+from .util import Blocked, atomic_json, company_normalizer, digest, now, private_dir
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS employer_accounts (id TEXT PRIMARY KEY, origin TEXT NOT NULL,
@@ -309,19 +309,39 @@ class Store:
           (key,job["company"],ck,job["title"],job["url"],job["host"],job["source"],json.dumps(job),now(),now()))
 
     def company(self, name, settings=None):
-        s=self.settings() if settings is None else settings; n=company_key(name)
-        aliases={company_key(k):company_key(v) for k,v in s["company_aliases"].items()}
-        return aliases.get(n,n)
+        s=self.settings() if settings is None else settings
+        return company_normalizer(s['company_aliases'])(name)
 
     def block(self, jid, reason, detail=""):
         self.db.execute("UPDATE jobs SET status='blocked',reason=?,updated=? WHERE id=?",(reason + (": " + detail if detail else ""),now(),jid))
         self.event("blocked",jid,{"reason":reason,"detail":detail})
 
+    def application_history(self, settings=None, states=None):
+        """Narrow history rows with current and originally recorded company identities.
+
+        Alias edits must not hide prior attempts. Stored keys remain evidence; current
+        aliases and the employer name on the original posting supplement those keys.
+        """
+        settings = self.settings() if settings is None else settings
+        normalize = company_normalizer(settings['company_aliases'])
+        where = '' if states is None else ' WHERE a.state IN (' + ','.join('?' for _ in states) + ')'
+        rows = self.db.execute('''SELECT a.id,a.job_id,a.company_key,a.state,a.created,a.attempted,j.company
+            FROM applications a LEFT JOIN jobs j ON j.id=a.job_id''' + where, () if states is None else states)
+        history = []
+        for row in rows:
+            entry = dict(row)
+            keys = {row['company_key'], normalize(row['company_key'])}
+            if row['company']: keys.add(normalize(row['company']))
+            entry['company_keys'] = keys
+            history.append(entry)
+        return history
+
     def _check_budget(self, job, s):
-        ck=self.company(job["company"])
-        if ck in {self.company(x) for x in s["skip_companies"]+s["interview_companies"]}:
+        ck=self.company(job["company"],s)
+        if ck in {self.company(x,s) for x in s["skip_companies"]+s["interview_companies"]}:
             raise Blocked("company_blocked")
-        active = list(self.db.execute("SELECT state,attempted,created FROM applications WHERE company_key=? AND state IN ('submitting','unknown','confirmed','awaiting_verification')",(ck,)))
+        all_active=self.application_history(s,('submitting','unknown','confirmed','awaiting_verification'))
+        active=[row for row in all_active if ck in row['company_keys']]
         if any(r["state"]=="awaiting_verification" for r in active):
             raise Blocked("company_verification_pending","Complete the earlier application verification first")
         if any(r["state"] in ("submitting","unknown") for r in active):
@@ -329,11 +349,10 @@ class Store:
         if len(active)>=s["max_per_company"]:
             raise Blocked("company_limit")
         local_day=datetime.now(ZoneInfo(s["timezone"])).date()
-        all_active=self.db.execute("SELECT company_key,attempted,created FROM applications WHERE state IN ('submitting','unknown','confirmed','awaiting_verification')")
         daily=[r for r in all_active if datetime.fromisoformat(r["attempted"] or r["created"]).astimezone(ZoneInfo(s["timezone"])).date()==local_day]
         if len(daily)>=s["max_per_day"]:
             raise Blocked("daily_limit")
-        if any(r["company_key"]==ck for r in daily):
+        if any(ck in r['company_keys'] for r in daily):
             raise Blocked("company_same_day")
         cutoff=datetime.now(timezone.utc)-timedelta(days=s["company_cooldown_days"])
         if any(datetime.fromisoformat(r["attempted"] or r["created"])>cutoff for r in active):

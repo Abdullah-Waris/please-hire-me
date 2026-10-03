@@ -124,6 +124,8 @@ macOS uses a LaunchAgent; Linux uses cron unless Pi systemd units are installed.
 
 OS schedule names are shared per operating-system user. Installation and removal verify the schedule’s applicant directory, so another instance cannot silently replace it. Remove an existing schedule from its original applicant instance before switching to a different one, or use separate terminal daemons or OS users. File locks prevent overlapping workers sharing a data directory.
 
+Changing company aliases cannot hide past applications from lifetime limits, same-day limits, cooldowns or uncertainty holds. The worker checks the originally recorded company identity together with the employer name under your current aliases. The `hireme duplicate COMPANY` command uses the same history lookup. Historical company keys are retained as evidence, so splitting an old alias group can keep a conservative hold.
+
 ## Run on a Raspberry Pi
 
 Target: **Pi 4 with 4 GB RAM**, 64-bit Raspberry Pi OS, reliable power, and your existing SD card. One headless browser and one worker run at a time; inference is remote. The service files and local fixtures are tested, but sustained operation on this hardware still needs a Pi-side smoke test.
