@@ -20,6 +20,7 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,
         store.run_generation=store.control_generation() if live else None
         store.preparation_generation=store.control_generation() if not live else None
         rid=uuid.uuid4().hex; s=store.settings(); count=0; attempts=0; reasons={}; outcomes={}; start=time.monotonic()
+        store.run_deadline=start+s['cycle_timeout_seconds']
         store.active_run_id=rid
         max_attempts=min(max_attempts or s['max_attempts_per_cycle'],s['max_attempts_per_cycle'])
         store.db.execute("INSERT INTO runs(id,started,status,detail) VALUES(?,?,'running',?)",(rid,now(),json.dumps({'mode':'live' if live else 'prepare'})))
@@ -54,7 +55,7 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,
                 with worker_lock(store.root,'browser'):
                     with browser_factory(store) as browser:
                         for _,job in sorted(ranked,key=lambda x:x[0],reverse=True):
-                            if count>=target or (max_attempts is not None and attempts>=max_attempts) or time.monotonic()-start>s['cycle_timeout_seconds']:break
+                            if count>=target or (max_attempts is not None and attempts>=max_attempts):break
                             store.checkpoint()
                             try:
                                 attempts+=1
@@ -65,7 +66,7 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,
                                 store.db.execute('UPDATE jobs SET status=? WHERE id=?',(outcome,job['id']))
                                 if outcome=='confirmed' or not live and outcome=='prepared':count+=1
                             except Blocked as e:
-                                if e.reason in ('paused','model_budget_exhausted','provider_rate_limited'):raise
+                                if e.reason in ('paused','cycle_timeout','model_budget_exhausted','provider_rate_limited'):raise
                                 store.event('application_finished',job['id'],{'run_id':rid,'outcome':'blocked','reason':e.reason,'detail':e.detail})
                                 reasons[e.reason]=reasons.get(e.reason,0)+1
                                 # Unknown outcomes must retain their distinct state.
@@ -88,6 +89,7 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,
         finally:
             store.run_generation=None
             store.preparation_generation=None
+            store.run_deadline=None
             store.active_run_id=None
             try:
                 from .reports import queue_report,flush_reports

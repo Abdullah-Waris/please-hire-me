@@ -125,7 +125,7 @@ CLI versions must support the required isolation flags. Claude inference disable
 
 Defaults: **six hours between batches**, seven confirmed applications targeted per batch, ten maximum per batch, 28 targeted daily and 40 maximum daily. There are also ceilings of **ten attempts per batch**, **40 model requests per batch**, and **100 model requests per local calendar day**. Configure these in Preferences. Failed model calls count; drafting and its grounding review are separate calls. API outputs default to a 2,000-token cap per request.
 
-These are ceilings and goals, not promises of throughput or remaining credits. Request counts do not measure subscription tokens or guarantee a dollar budget. Set a vendor-side spending limit for paid APIs. Rate limits stop the batch without automatic model retries. CLI timeouts and batch duration are bounded. Your computer must be awake for scheduled work.
+These are ceilings and goals, not promises of throughput or remaining credits. Request counts do not measure subscription tokens or guarantee a dollar budget. Set a vendor-side spending limit for paid APIs. Rate limits stop the batch without automatic model retries. **Time budget per batch** in Preferences defaults to 180 minutes and applies to discovery, preparation, model requests and application work at their next checkpoint. An in-flight request or confirmation can finish before that checkpoint. Completed progress stays recorded, and reaching the limit leaves your pause setting unchanged. CLI calls also have their own timeout. Your computer must be awake for scheduled work.
 
 ```bash
 .venv/bin/python -m hireme pause

@@ -388,7 +388,7 @@ def test_without_gmail_connection_verification_is_held_and_not_retried(store,ats
     assert store.db.execute('SELECT state FROM applications').fetchone()[0]=='awaiting_verification'
 
 
-@pytest.mark.parametrize('reason',['model_budget_exhausted','provider_rate_limited'])
+@pytest.mark.parametrize('reason',['model_budget_exhausted','provider_rate_limited','cycle_timeout'])
 def test_model_budget_and_rate_limit_stop_before_employer_write(store,ats,monkeypatch,reason):
     class Model:
         def __init__(self,*args):pass

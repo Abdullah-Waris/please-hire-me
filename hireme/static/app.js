@@ -1513,11 +1513,14 @@ function renderSettings() {
       input.checked = !!v;
       continue;
     }
-    input.value = Array.isArray(v)
-      ? v.join("\n")
-      : typeof v === "object"
-        ? JSON.stringify(v, null, 2)
-        : v;
+    input.value =
+      input.name === "cycle_timeout_seconds"
+        ? v / 60
+        : Array.isArray(v)
+          ? v.join("\n")
+          : typeof v === "object"
+            ? JSON.stringify(v, null, 2)
+            : v;
   }
   renderAliasRows(state.settings.company_aliases);
 }
@@ -1673,7 +1676,10 @@ function runRow(run) {
       )
       .join("; ");
     const reason =
-      data.reason ||
+      (typeof data.reason === "string" &&
+      data.reason.startsWith("cycle_timeout")
+        ? "Batch time budget reached. Completed progress is saved."
+        : data.reason) ||
       Object.entries(data.reasons || {})
         .map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`)
         .join("; ");
@@ -1997,7 +2003,11 @@ $("#settings-form").onsubmit = async (event) => {
     for (const input of event.target.elements) {
       if (!input.name) continue;
       if (input.type === "checkbox") data[input.name] = input.checked;
-      else if (input.type === "number") data[input.name] = Number(input.value);
+      else if (input.type === "number")
+        data[input.name] =
+          input.name === "cycle_timeout_seconds"
+            ? Math.round(Number(input.value) * 60)
+            : Number(input.value);
       else if (input.name === "company_aliases") {
         data[input.name] = readAliasJson();
       } else if (Array.isArray(state.settings[input.name]))
@@ -2851,6 +2861,7 @@ function organizePreferences() {
       "Decide how often your desk works and how many applications it can submit. Targets are goals; ceilings are firm limits.",
       [
         "schedule_hours",
+        "cycle_timeout_seconds",
         "timezone",
         "target_per_cycle",
         "max_per_cycle",

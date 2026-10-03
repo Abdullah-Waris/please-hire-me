@@ -969,6 +969,18 @@
                   max="24" /></label
               ><label>Timezone<input name="timezone" required /></label
               ><label
+                >Time budget per batch, minutes<input
+                  name="cycle_timeout_seconds"
+                  type="number"
+                  min="0.016666666666666666"
+                  max="1440"
+                  step="any"
+                  required
+                /><span class="help"
+                  >Discovery and application steps share this budget. Progress
+                  stays recorded when a batch stops.</span
+                ></label
+              ><label
                 >Attempt ceiling per batch<input
                   name="max_attempts_per_cycle"
                   type="number"

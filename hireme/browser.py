@@ -416,7 +416,7 @@ class Browser:
                             from .provider import LazyProvider
                             doc=generate_cover_letter(self.store,job,LazyProvider(self.store.settings()['model_timeout_seconds'],store=self.store,checkpoint=self.store.checkpoint,observer=lambda stage,detail:self.store.event(stage,job['id'],detail)))
                         except Blocked as e:
-                            if e.reason in ('paused','model_budget_exhausted','provider_rate_limited'):raise
+                            if e.reason in ('paused','cycle_timeout','model_budget_exhausted','provider_rate_limited'):raise
                             self.store.event('document_blocked',job['id'],{'label':f['label'],'reason':e.reason,'detail':e.detail})
                             pending.append((f,e.reason));continue
                     if not doc:
@@ -432,7 +432,7 @@ class Browser:
                         self.store.event('field_answered',job['id'],{'label':f['label'],'value':a['value'],'provenance':a['provenance']})
                     elif f['value']:raise Blocked('unknown_prefilled_value',f['label'])
                 except Blocked as e:
-                    if e.reason in ('human_work_sample','paused','model_budget_exhausted','provider_rate_limited'):raise
+                    if e.reason in ('human_work_sample','paused','cycle_timeout','model_budget_exhausted','provider_rate_limited'):raise
                     self.store.event('field_blocked',job['id'],{'label':f['label'],'options':f['options'],'required':f['required'],'reason':e.reason})
                     if not f['required'] and not f['value']:
                         self.store.resolve_known_question(job['answer_scope'],f['label']);continue

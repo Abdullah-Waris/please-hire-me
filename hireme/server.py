@@ -18,6 +18,8 @@ MAX_BODY=21*1024*1024
 def _action_failure(error, discovery_only=False):
     from .util import Blocked
     if isinstance(error, Blocked) and error.reason == 'paused': return None
+    if isinstance(error, Blocked) and error.reason == 'cycle_timeout':
+        return 'Your last batch reached its time budget. Completed progress is saved. You can adjust the time budget in Preferences before starting another batch.'
     reason = error.reason.replace('_', ' ') if isinstance(error, Blocked) else {
         'PermissionError': 'access to a required local file was denied',
         'FileNotFoundError': 'a required local file was not found',

@@ -5,6 +5,7 @@ import fcntl
 import json
 import os
 import sqlite3
+import time
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
@@ -116,6 +117,9 @@ class Store:
         generation=getattr(self,'run_generation',None)
         if generation is not None and (generation!=self.control_generation() or not self.settings()['live_enabled']):
             raise Blocked('paused')
+        deadline=getattr(self,'run_deadline',None)
+        if deadline is not None and time.monotonic()>=deadline:
+            raise Blocked('cycle_timeout','The batch time budget was reached')
 
     def reserve_model_request(self):
         with self.transaction():

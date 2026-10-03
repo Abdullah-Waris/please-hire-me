@@ -525,6 +525,7 @@ def test_transcript_upload_replace_invalid_and_responsive_ui(tmp_path):
     from hireme.store import Store
     root=tmp_path/'private'
     store=Store(root)
+    store.update_settings({'cycle_timeout_seconds': 30})
     store.db.execute('INSERT INTO documents VALUES(?,?,?)',('resume','original','original.pdf'))
     store.close()
     transcript=tmp_path/'transcript.pdf'
@@ -559,6 +560,7 @@ def test_transcript_upload_replace_invalid_and_responsive_ui(tmp_path):
             updated=store.db.execute("SELECT hash FROM documents WHERE kind='transcript'").fetchone()[0]
             assert updated!=original
             page.locator('[data-view="settings"]').click()
+            expect(page.locator('[name="cycle_timeout_seconds"]')).to_have_value('0.5')
             expect(page.locator('[name="employer_accounts"]')).not_to_be_checked()
             page.set_viewport_size({'width':390,'height':844})
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
@@ -568,6 +570,12 @@ def test_transcript_upload_replace_invalid_and_responsive_ui(tmp_path):
             page.get_by_role('button',name='Save preferences',exact=True).click()
             expect(page.locator('#notice')).to_contain_text('Search preferences saved')
             assert store.settings()['employer_accounts'] is True
+            assert store.settings()['cycle_timeout_seconds'] == 30
+            page.locator('[name="cycle_timeout_seconds"]').fill('2.5')
+            page.get_by_role('button',name='Save preferences',exact=True).click()
+            expect(page.locator('#notice')).to_contain_text('Search preferences saved')
+            assert store.settings()['cycle_timeout_seconds'] == 150
+            assert not store.settings()['live_enabled']
             from hireme.accounts import AccountVault
             store.put_facts({'email':'test@candidate.invalid'})
             vault=AccountVault(store)

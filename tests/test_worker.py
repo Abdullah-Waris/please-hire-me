@@ -117,3 +117,58 @@ def test_resume_cannot_revive_cancelled_preparation_or_reserve_another_request(s
     store.update_settings({'live_enabled': False}); store.update_settings({'live_enabled': True})
     with pytest.raises(Blocked, match='paused'): store.reserve_model_request()
     assert store.db.execute('SELECT COUNT(*) FROM model_requests').fetchone()[0] == 0
+
+
+def test_time_budget_stops_discovery_before_the_next_source(store, monkeypatch):
+    clock = [100.0]; visited = []
+    monkeypatch.setattr('hireme.worker.time.monotonic', lambda: clock[0])
+    store.update_settings({'cycle_timeout_seconds': 1})
+    def lists(s):
+        visited.append('lists'); clock[0] += 1
+    monkeypatch.setattr('hireme.worker.sweep_lists', lists)
+    monkeypatch.setattr('hireme.worker.sweep_portals', lambda s: visited.append('portals'))
+    monkeypatch.setattr('hireme.worker.sweep_boards', lambda s, r: visited.append('boards'))
+    with pytest.raises(Blocked, match='cycle_timeout'):
+        cycle(store, Path('.'))
+    run = store.db.execute('SELECT * FROM runs').fetchone()
+    assert visited == ['lists'] and run['status'] == 'blocked' and run['submitted'] == 0
+    assert store.settings()['live_enabled'] and store.run_deadline is None
+    assert store.db.execute('SELECT COUNT(*) FROM model_requests').fetchone()[0] == 0
+
+
+@pytest.mark.parametrize('live', [True, False])
+def test_time_budget_preserves_completed_work_and_stops_the_next_application(store, job, package, monkeypatch, live):
+    clock = [100.0]; visited = []
+    monkeypatch.setattr('hireme.worker.time.monotonic', lambda: clock[0])
+    store.update_settings({'cycle_timeout_seconds': 1, 'live_enabled': live})
+    store.upsert_job({**job, 'id': digest('timed-second'), 'url': job['url'] + '-second', 'company': 'Other Company'})
+    class FakeBrowser:
+        def __init__(self, s): self.s = s
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def apply(self, selected, live=True):
+            visited.append(selected['id'])
+            aid = self.s.prepare(selected, {**package, 'job_id': selected['id'], 'url': selected['url']})
+            if live:
+                self.s.begin_submit(aid); self.s.finish(aid, 'confirmed')
+            clock[0] += 1
+            return 'confirmed' if live else 'prepared'
+    with pytest.raises(Blocked, match='cycle_timeout'):
+        cycle(store, Path('.'), discover=False, live=live, limit=2, browser_factory=FakeBrowser)
+    run = store.db.execute('SELECT * FROM runs').fetchone(); detail = json.loads(run['detail'])
+    assert len(visited) == 1 and run['status'] == 'blocked' and run['submitted'] == int(live)
+    assert detail['confirmed' if live else 'prepared'] == 1
+    assert store.db.execute('SELECT state FROM applications').fetchone()[0] == ('confirmed' if live else 'prepared')
+    assert store.settings()['live_enabled'] == live and store.run_deadline is None
+    # The deadline belongs to this run; it must not block later owner actions.
+    store.checkpoint()
+
+
+def test_expired_budget_cannot_reserve_a_model_request_and_pause_has_priority(store, monkeypatch):
+    monkeypatch.setattr('hireme.store.time.monotonic', lambda: 10.0)
+    store.run_deadline = 10.0
+    with pytest.raises(Blocked, match='cycle_timeout'): store.reserve_model_request()
+    assert store.db.execute('SELECT COUNT(*) FROM model_requests').fetchone()[0] == 0
+    store.run_generation = store.control_generation()
+    store.update_settings({'live_enabled': False})
+    with pytest.raises(Blocked, match='paused'): store.checkpoint()
