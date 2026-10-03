@@ -344,7 +344,7 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     elif path=='/api/job':
                         from .discovery import posting
                         job=posting(data['url'],data['company'],data['title'],data['location'],'user',data.get('description',''))
-                        store.upsert_job(job);result={'id':job['id']}
+                        result={'id':store.upsert_job(job)}
                     elif path=='/api/run':
                         start_cycle();result={'started':True}
                     elif path=='/api/discover':

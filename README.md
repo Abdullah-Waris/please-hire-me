@@ -63,6 +63,8 @@ Open the printed URL. This creates a temporary, read-only workspace with invente
 
 **Discovery source health** shows the latest check for every recorded source, with unavailable sources first. Search the source name or recorded error, filter available/unavailable checks, and browse 25-record pages. The overall counts cover the complete source ledger; filtering does not change them. Checks load when you open the panel, and a failed load can be retried locally.
 
+When a requisition is discovered again, its current employer, title and posting content update together in the ledger and exports. Its URL keeps the original record identity, discovery date, holds and application outcomes. Existing application evidence and recorded company keys remain unchanged.
+
 In Preferences, **Alternate company names** uses ordinary name fields: map an employer’s other name to its main name. Add or remove rows, then save preferences. Duplicate spellings are flagged before saving. **Edit as JSON** is available for larger mappings; switch back to name fields after correcting any JSON errors. These changes preserve recorded application attempts and their company holds.
 
 To reverse an exclusion, open an opportunity’s details and choose **Include this company again**. This removes matching names from the exclusion list. Existing job, question and application records stay unchanged; the next batch reevaluates unattempted opportunities under your other preferences, company limits and uncertainty holds. The action does not resume submissions.

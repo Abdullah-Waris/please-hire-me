@@ -314,11 +314,20 @@ class Store:
                         (host,label,'legacy_history_review'))
 
     def upsert_job(self, job):
-        key = job["id"]
-        ck = self.company(job["company"])
-        self.db.execute("""INSERT INTO jobs(id,company,company_key,title,url,host,source,payload,first_seen,updated)
-         VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET payload=excluded.payload,updated=excluded.updated""",
-          (key,job["company"],ck,job["title"],job["url"],job["host"],job["source"],json.dumps(job),now(),now()))
+        # A requisition URL owns its durable identity, even if an imported record
+        # supplies another ID. Refresh display metadata alongside its payload;
+        # recorded application keys and outcome states remain evidence.
+        with self.transaction():
+            existing=self.db.execute('SELECT id FROM jobs WHERE url=?',(job['url'],)).fetchone()
+            key=existing['id'] if existing else job['id']
+            payload={**job,'id':key}
+            ck=self.company(job['company'])
+            self.db.execute("""INSERT INTO jobs(id,company,company_key,title,url,host,source,payload,first_seen,updated)
+             VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET
+             company=excluded.company,company_key=excluded.company_key,title=excluded.title,
+             host=excluded.host,source=excluded.source,payload=excluded.payload,updated=excluded.updated""",
+              (key,job['company'],ck,job['title'],job['url'],job['host'],job['source'],json.dumps(payload),now(),now()))
+        return key
 
     def company(self, name, settings=None):
         s=self.settings() if settings is None else settings
