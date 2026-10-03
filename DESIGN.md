@@ -1,12 +1,14 @@
 # Application desk
 
 ## Surface
-Operate: a daily job-search desk. The first viewport shows the current worker state, today's real application ledger and exceptions requiring a human.
+A private application workspace for individual applicants. Overview shows the worker state, today's confirmed submissions, distinct opportunities needing attention, and the persisted opportunity ledger. Counts reflect local records; no sample activity appears in the real workspace.
 
 ## Direction
-A compact editorial work ledger: cool neutral paper, deep navy text, restrained blue actions, ruled tables, plain tabs, and tabular counts. The desktop has a narrow navigation rail and one working column; mobile converts navigation to a horizontal bar and rows to labeled records. No decorative charts or invented activity.
+Cool paper, white surfaces, deep navy text, restrained blue actions, and compact editorial tables. A narrow desktop sidebar groups the workspace, personal sources, and connections. Small uppercase labels establish hierarchy; generous space keeps forms approachable. A typographic monogram and a CSS document illustration introduce the product without remote assets.
 
-The grounded systems considered were recruiting trackers, calendar agendas, inbox triage, research notebooks, build monitors, casework registers and editorial work ledgers. The assigned seventh direction is the editorial ledger. The darkroom challenger loses product clarity; retain its distinction between unresolved and committed states. The manual challenger adds explicit section navigation. Consumer cards lose scanning density; retain accessible touch targets. Implementation judgment is delegated by the user's instruction to implement fully.
+The overview uses three summary cards, searchable and sortable opportunities, plain-language status badges, and an expandable posting form. Search includes company, role, and location. Attention counts deduplicate blocked jobs and their questions. Setup presents a numbered checklist, optional-source labels, and visible guided progress. Preferences are grouped into search, company boundaries, pace, model usage, and browser configuration.
 
 ## Tokens and behavior
-Background #f3f5f7; surface #ffffff; ink #182839; muted #5d6771; rule #dce0df; action #255b91. System text face serves an operating interface, not a branded display. 16px base, 1.5 line height. Semantic state labels always accompany color. Visible focus, real labels, live status updates, reduced motion, no external assets.
+Background #f4f6f9; surface #ffffff; ink #1c2b40; muted #65748a; rule #e2e8ef; action #285ed5. System typography, 15px base and 1.6 line height. State labels accompany color. Controls have at least 44px height, visible focus, real labels, and live notices. Reduced motion is respected. No external fonts, images, scripts, or styles are required.
+
+On smaller screens the sidebar becomes a scrollable horizontal navigation bar. Summary cards reflow, forms become one column, and table rows become labeled records. The workspace must not overflow at 390px. Browser fixture tests cover uploads, setup, counts, filtering, sorting, posting creation, safe text rendering, preferences, and mobile navigation.

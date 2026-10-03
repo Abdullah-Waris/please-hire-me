@@ -236,3 +236,88 @@ def test_fresh_user_guided_setup_saves_paused_and_provider_key_private(tmp_path)
             assert ledger.db.execute('SELECT count(*) FROM materials WHERE confirmed=1').fetchone()[0]==1
             ledger.close();assert not errors;browser.close()
     finally:process.terminate();process.join(5)
+
+
+def test_workspace_real_counts_search_sort_and_mobile_navigation(store, tmp_path):
+    """Exercise the redesigned ledger against persisted synthetic application states."""
+    from playwright.sync_api import sync_playwright, expect
+    from hireme.discovery import posting
+    from hireme.util import now
+
+    jobs = []
+    for index, (company, location, status, score) in enumerate([
+        ('Cedar Labs', 'New York', 'confirmed', 91),
+        ('Atlas Research', 'Remote (US)', 'blocked', 82),
+        ('Meridian', 'Seattle', 'discovered', 75),
+    ]):
+        job = posting(f'https://jobs.lever.co/workspace/req-{index}', company,
+                      'Software Engineer Intern', location, 'fixture')
+        store.upsert_job(job)
+        store.db.execute('UPDATE jobs SET status=?,score=? WHERE id=?', (status, score, job['id']))
+        jobs.append(job)
+    stamp = now()
+    store.db.execute('''INSERT INTO applications
+        (id,job_id,company_key,state,package,hash,created,updated,attempted)
+        VALUES(?,?,?,?,?,?,?,?,?)''',
+        ('fixture-submission', jobs[0]['id'], 'cedar labs', 'confirmed',
+         '{"answers":[]}', 'fixture', stamp, stamp, stamp))
+    # A blocked job with a question should count once in the attention queue.
+    store.db.execute('INSERT INTO questions VALUES(?,?,?,?,?,?,0)',
+                     ('fixture-question', jobs[1]['id'], jobs[1]['host'],
+                      'Which work location do you prefer?', '["Remote", "New York"]', 'unknown_fact'))
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port))
+    process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch()
+            page = browser.new_page(viewport={'width': 1440, 'height': 1000})
+            errors = []; page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(base + '/#token=fixture-capability')
+            expect(page.locator('#metric-submitted')).to_have_text('1')
+            expect(page.locator('#metric-attention')).to_have_text('1')
+            expect(page.locator('#metric-opportunities')).to_have_text('3')
+            expect(page.locator('#jobs tbody tr')).to_have_count(3)
+            page.locator('#job-sort').select_option('company')
+            expect(page.locator('#jobs tbody tr').first).to_contain_text('Atlas Research')
+            page.locator('#job-sort').select_option('fit')
+            expect(page.locator('#jobs tbody tr').first).to_contain_text('Cedar Labs')
+            captures = tmp_path / 'workspace'; captures.mkdir()
+            page.screenshot(path=str(captures / 'overview-desktop.png'), full_page=True)
+            page.locator('#job-search').fill('remote')
+            expect(page.locator('#jobs tbody tr')).to_have_count(1)
+            expect(page.locator('#jobs')).to_contain_text('Atlas Research')
+            page.locator('#status-filter').select_option('confirmed')
+            expect(page.locator('#jobs')).to_contain_text('No matching opportunities')
+            page.locator('#job-search').fill('')
+            expect(page.locator('#jobs tbody tr')).to_have_count(1)
+            page.locator('#status-filter').select_option('all')
+            page.locator('#add-posting').click()
+            expect(page.locator('#job-form [name=company]')).to_be_focused()
+            page.locator('#job-form [name=company]').fill('Synthetic <img onerror=alert(1)>')
+            page.locator('#job-form [name=title]').fill('Research Engineering Intern')
+            page.locator('#job-form [name=url]').fill('https://jobs.lever.co/workspace/req-added')
+            page.locator('#job-form [name=location]').fill('Remote (US)')
+            page.locator('#job-form button').click()
+            expect(page.locator('#metric-opportunities')).to_have_text('4')
+            expect(page.locator('#jobs')).to_contain_text('Synthetic <img onerror=alert(1)>')
+            assert page.locator('#jobs img').count() == 0
+            page.set_viewport_size({'width': 390, 'height': 844})
+            page.screenshot(path=str(captures / 'overview-mobile.png'), full_page=True)
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            page.locator('#review-queue').click()
+            expect(page.locator('#heading')).to_have_text('A few things need you')
+            expect(page.locator('#question-list')).to_contain_text('Which work location')
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            page.locator('[data-view=settings]').click()
+            expect(page.get_by_role('group', name='Your pace')).to_be_visible()
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            page.screenshot(path=str(captures / 'preferences-mobile.png'), full_page=True)
+            assert not errors
+            browser.close()
+    finally:
+        process.terminate(); process.join(5)

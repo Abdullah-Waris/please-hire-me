@@ -45,6 +45,12 @@ The setup page checks the machine and guides you through:
 
 Setup is resumable: saved documents, facts, and preferences remain in the local database after you close the browser. The steps use the same editing screens you can revisit later. Choosing Pi does not transfer your files or provision another machine.
 
+### Your application workspace
+
+**Overview** brings together today’s confirmed applications, opportunities needing attention, and your application ledger. Search by company, role, or location; sort by recency, fit, or company; or add a posting you found yourself. Counts come from your saved records. **Needs you** collects questions, blocked opportunities, uncertain outcomes, and employer-account checks in one place.
+
+Use **Setup checklist** to get started, then revisit **Your facts**, **Writing & context**, and **Preferences** as your search changes. Preferences are grouped by search goals, company boundaries, your pace, model usage, and browser settings. The workspace also works on narrow screens, with labeled application records and horizontal navigation.
+
 ### Model setup
 
 | Choice | What you provide | Billing |
