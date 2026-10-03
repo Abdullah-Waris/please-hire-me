@@ -1,6 +1,7 @@
 "use strict";
 let materialOffset = 0;
 let materialPagingBusy = false;
+let renderedMaterialsSignature = null;
 let materialSearch = "",
   materialStatus = "all";
 let token = new URLSearchParams(location.hash.slice(1)).get("token") || "";
@@ -2640,6 +2641,24 @@ function renderMaterials() {
     [...list.querySelectorAll("form")].some((form) => dirtyForms.has(form))
   )
     return;
+  const signature = JSON.stringify({
+    offset: state.material_offset,
+    count: state.material_count,
+    total: state.material_total,
+    search: materialSearch,
+    status: materialStatus,
+    sources: state.materials.map((source) => [
+      source.id,
+      source.revision,
+      source.updated,
+      source.original_name,
+      source.kind,
+      source.role,
+      source.confirmed,
+      source.original_available,
+    ]),
+  });
+  if (signature === renderedMaterialsSignature) return;
   list.replaceChildren();
   if (state.material_count > 20) {
     const controls = el("div", undefined, "actions"),
@@ -2660,13 +2679,16 @@ function renderMaterials() {
     );
     list.append(controls);
   }
-  if (!state.materials.length)
-    return empty(
+  if (!state.materials.length) {
+    empty(
       list,
       state.material_total
         ? "No sources match these filters. Try another search or choose Clear filters."
         : "Upload a writing sample, cover-letter example or supporting document to begin. Each source gets a review before the model uses it.",
     );
+    renderedMaterialsSignature = signature;
+    return;
+  }
   for (const source of state.materials) {
     const box = el("article", undefined, "section");
     box.append(
@@ -2768,6 +2790,7 @@ function renderMaterials() {
     box.append(form);
     list.append(box);
   }
+  renderedMaterialsSignature = signature;
 }
 $("#material-upload-form").onsubmit = async (event) => {
   event.preventDefault();

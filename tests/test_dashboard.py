@@ -886,6 +886,9 @@ def test_material_upload_review_and_context_preferences(tmp_path):
             form=page.locator('.material-review')
             form.locator('select').select_option('personal');form.locator('input[type=checkbox]').check();form.get_by_role('button',name='Save reviewed source',exact=True).click()
             expect(page.locator('#material-list')).to_contain_text('Approved')
+            page.evaluate("()=>{window.readingSource=document.querySelector('#material-list article');document.activeElement.blur();}")
+            page.evaluate('refresh()')
+            assert page.evaluate("window.readingSource===document.querySelector('#material-list article')")
             store=Store(root)
             assert store.db.execute('SELECT confirmed,role FROM materials').fetchone()[0]==1
             assert len(store.templates())==1 and not store.facts()

@@ -100,3 +100,7 @@ An explicit matching upload restores missing, damaged, unreadable or overly perm
 ### Source-specific original-file guidance
 
 Each writing-source card identifies an original file that is missing, empty, oversized, linked, nonregular, unreadable or exposed through group/other permissions. The bounded readability check does not hash or parse every original during dashboard polling and does not certify integrity; backups continue to verify full content hashes. Private read-only originals remain available without modifying their permissions. Existing excerpts and approvals remain untouched. A synthetic dashboard regression shows the notice before matching recovery and clears it afterward; the visible notice passed selected accessibility checks and overflow checks at 320, 390 and 1440 pixels.
+
+### Stable source-library reading
+
+Ordinary refresh retains unchanged writing-source cards rather than rebuilding their forms. Two focused synthetic browser workflows passed, including explicit node-identity preservation while focus is outside the library, missing-original notice/recovery, unchanged reviews, pagination, filters and retry. This frontend-only change also passed JavaScript syntax and whitespace checks; the previous full-suite result remains 434 passes with the separately added private read-only-file check covered by focused source tests.
