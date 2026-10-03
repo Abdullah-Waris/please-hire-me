@@ -78,7 +78,7 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,
                                 store.event('application_finished',job['id'],{'run_id':rid,'outcome':'error','error':type(e).__name__,'detail':str(e)[:1200]})
                                 reasons['browser_error']=reasons.get('browser_error',0)+1
                                 store.block(job['id'],'browser_error',type(e).__name__)
-            detail=json.dumps({'target':target,'attempts':attempts,'outcomes':outcomes,'confirmed':count,'shortfall':max(0,target-count),'reasons':reasons,'mode':'live' if live else 'prepare'})
+            detail=json.dumps({'target':target,'attempts':attempts,'outcomes':outcomes,'confirmed':count if live else 0,'prepared':count if not live else 0,'shortfall':max(0,target-count),'reasons':reasons,'mode':'live' if live else 'prepare'})
             store.db.execute("UPDATE runs SET finished=?,status='finished',submitted=?,detail=? WHERE id=?",(now(),count if live else 0,detail,rid))
             return json.loads(detail)
         except Exception as e:
