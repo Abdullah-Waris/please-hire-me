@@ -1557,6 +1557,12 @@ pre {
   border-top: 1px solid var(--rule);
   padding: 20px 28px;
 }
+.company-action {
+  margin-bottom: 18px;
+}
+.company-action .help {
+  margin-bottom: 0;
+}
 .button-link {
   display: inline-block;
   background: var(--action);

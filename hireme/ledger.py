@@ -105,6 +105,8 @@ def search_jobs(store, search='', status='all', sort='recent', offset=0, limit=5
     rows = store.db.execute('SELECT j.* FROM jobs j' + where + ' ORDER BY ' + ordering[sort] + ' LIMIT ? OFFSET ?',
                             [*parameters, limit, offset])
     jobs = [{**dict(row), **job_display(dict(row))} for row in rows]
+    from .company_controls import annotate_companies
+    jobs = annotate_companies(store, jobs)
     applications = []
     if jobs:
         placeholders = ','.join('?' for _ in jobs)

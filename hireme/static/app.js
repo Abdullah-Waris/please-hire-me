@@ -2087,6 +2087,21 @@ document.addEventListener("input", (event) => {
 function openOpportunity(job) {
   const payload = jobPayload(job),
     dialog = $("#job-dialog");
+  dialog.dataset.jobId = job.id;
+  const unsavedPreferences = dirtyForms.has($("#settings-form"));
+  $("#skip-job-company").disabled =
+    state.demo || job.company_skipped || unsavedPreferences;
+  $("#skip-job-company").textContent = job.company_skipped
+    ? "Company is skipped"
+    : "Skip this company";
+  $("#skip-company-help").removeAttribute("role");
+  $("#skip-company-help").textContent = state.demo
+    ? "Company boundaries can be changed in your own workspace."
+    : unsavedPreferences
+      ? "Save your pending preferences before changing company boundaries."
+      : job.company_skipped
+        ? "Manage your skipped companies in Preferences."
+        : "Stops future applications at this company and its configured aliases. Past attempts and uncertain outcomes stay recorded.";
   $("#job-dialog-title").textContent = job.title;
   $("#job-dialog-company").textContent = job.company;
   $("#job-dialog-location").textContent =
@@ -2132,6 +2147,24 @@ function openOpportunity(job) {
   dialog.showModal();
 }
 $("#close-job-dialog").onclick = () => $("#job-dialog").close();
+$("#skip-job-company").onclick = async (event) => {
+  event.target.disabled = true;
+  try {
+    const result = await api("/api/company-skip", {
+      id: $("#job-dialog").dataset.jobId,
+    });
+    await refresh();
+    $("#job-dialog").close();
+    $("#heading").tabIndex = -1;
+    $("#heading").focus({ preventScroll: true });
+    note(result.message);
+  } catch (error) {
+    $("#skip-company-help").textContent = error.message;
+    $("#skip-company-help").setAttribute("role", "alert");
+    note(error.message, true);
+    event.target.disabled = false;
+  }
+};
 $("#job-dialog").addEventListener("click", (event) => {
   if (event.target !== event.currentTarget) return;
   const bounds = event.currentTarget.getBoundingClientRect();

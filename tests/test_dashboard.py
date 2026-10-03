@@ -348,7 +348,7 @@ def test_demo_is_read_only_and_export_requires_auth(tmp_path):
             except OSError: time.sleep(.1)
         try: urllib.request.urlopen(base + '/api/export.csv'); assert False
         except urllib.error.HTTPError as error: assert error.code == 403
-        for endpoint in ('pause', 'resume-worker', 'run', 'facts', 'settings', 'complete-setup', 'backup', 'recover', 'answer-revoke', 'schedule-apply'):
+        for endpoint in ('pause', 'resume-worker', 'run', 'facts', 'settings', 'complete-setup', 'backup', 'recover', 'answer-revoke', 'schedule-apply', 'company-skip'):
             request = urllib.request.Request(base + '/api/' + endpoint, data=b'{}', headers={'X-Hireme-Token': 'fixture-capability'})
             try: urllib.request.urlopen(request); assert False
             except urllib.error.HTTPError as error:
@@ -748,5 +748,51 @@ def test_saved_answers_review_withdrawal_and_restricted_browser_storage(store, j
             expect(page.locator('#saved-answers')).to_be_focused()
             assert store.saved_answer(job['host'], 'Café 100% <synthetic> question', []) is None
             assert not errors and '#' not in page.url
+            browser.close()
+    finally: process.terminate(); process.join(5)
+
+
+def test_company_shortcut_preserves_preference_drafts_and_shows_dialog_errors(store, job):
+    from playwright.sync_api import sync_playwright, expect
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 320, 'height': 844}); errors = []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(base + '/#token=fixture-capability')
+            expect(page.locator('#jobs .opportunity-details')).to_have_count(1)
+            page.locator('[data-view=settings]').click()
+            page.locator('#settings-form [name=locations]').fill('San Francisco')
+            page.locator('[data-view=today]').click()
+            page.locator('#jobs .opportunity-details').click()
+            expect(page.locator('#skip-job-company')).to_be_disabled()
+            expect(page.locator('#skip-company-help')).to_contain_text('Save your pending preferences')
+            page.keyboard.press('Escape')
+            page.locator('[data-view=settings]').click()
+            expect(page.locator('#settings-form [name=locations]')).to_have_value('San Francisco')
+            page.locator('#settings-form button[type=submit]').click()
+            expect(page.locator('#notice')).to_contain_text('Search preferences saved')
+            page.locator('[data-view=today]').click()
+            page.locator('#jobs .opportunity-details').click()
+            page.route('**/api/company-skip', lambda route: route.fulfill(status=400, json={'error': 'Synthetic failure; try again'}))
+            page.locator('#skip-job-company').click()
+            expect(page.locator('#skip-company-help')).to_contain_text('Synthetic failure')
+            expect(page.locator('#skip-job-company')).to_be_enabled()
+            page.unroute('**/api/company-skip')
+            page.locator('#skip-job-company').click()
+            expect(page.locator('#job-dialog')).not_to_be_visible()
+            expect(page.locator('#notice')).to_contain_text('Future applications at Acme are skipped')
+            expect(page.locator('#jobs')).to_contain_text('Not a match')
+            expect(page.locator('#heading')).to_be_focused()
+            assert store.settings()['skip_companies'] == ['Acme']
+            page.locator('#jobs .opportunity-details').click()
+            expect(page.locator('#skip-job-company')).to_have_text('Company is skipped')
+            expect(page.locator('#skip-job-company')).to_be_disabled()
+            assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             browser.close()
     finally: process.terminate(); process.join(5)

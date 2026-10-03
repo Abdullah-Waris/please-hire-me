@@ -23,7 +23,7 @@ The `hireme/` package stays flat so existing imports and command wrappers remain
 | Applicant documents and writing | `onboarding.py`, `materials.py`, `letters.py`, `answers.py`, `saved_answers.py` |
 | Inference and credentials | `provider.py`, `connections.py` |
 | Employer accounts and encrypted transfer | `accounts.py`, `account_transfer.py` |
-| Application execution | `worker.py`, `browser.py`, `policy.py` |
+| Application execution and company boundaries | `worker.py`, `browser.py`, `policy.py`, `company_controls.py` |
 | Discovery | `discovery.py`, `portals.py`, `net.py` |
 | Persistence and migration | `store.py`, `config.py`, `backup.py`, `migration.py`, `util.py` |
 | Email | `gmail.py`, `reports.py` |

@@ -96,6 +96,8 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     snapshot['summary']=summary(store)
                     from .presentation import job_display
                     snapshot['jobs']=[{**job,**job_display(job)} for job in snapshot['jobs']]
+                    from .company_controls import annotate_companies
+                    snapshot['jobs']=annotate_companies(store,snapshot['jobs'])
                     snapshot['demo']=demo
                     from .recovery import worker_status
                     activity=worker_status(store)
@@ -253,6 +255,9 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                         try:AccountVault(store).reconcile(data['id'],data['note'])
                         except Blocked as e:return self.send(409,{'error':e.reason})
                         result={'saved':True}
+                    elif path=='/api/company-skip':
+                        from .company_controls import skip_company
+                        result=skip_company(store,data['id'])
                     elif path=='/api/job':
                         from .discovery import posting
                         job=posting(data['url'],data['company'],data['title'],data['location'],'user',data.get('description',''))

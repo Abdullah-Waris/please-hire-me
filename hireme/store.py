@@ -308,8 +308,8 @@ class Store:
          VALUES(?,?,?,?,?,?,?,?,?,?) ON CONFLICT(url) DO UPDATE SET payload=excluded.payload,updated=excluded.updated""",
           (key,job["company"],ck,job["title"],job["url"],job["host"],job["source"],json.dumps(job),now(),now()))
 
-    def company(self, name):
-        s=self.settings(); n=company_key(name)
+    def company(self, name, settings=None):
+        s=self.settings() if settings is None else settings; n=company_key(name)
         aliases={company_key(k):company_key(v) for k,v in s["company_aliases"].items()}
         return aliases.get(n,n)
 
