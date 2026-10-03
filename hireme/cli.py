@@ -24,6 +24,7 @@ def main(argv=None):
     p=sub.add_parser('gmail');p.add_argument('action',choices=['import-client','connect','status','disconnect']);p.add_argument('path',type=Path,nargs='?')
     p=sub.add_parser('backup');p.add_argument('path',type=Path)
     p=sub.add_parser('restore');p.add_argument('path',type=Path)
+    p=sub.add_parser('account-vault');p.add_argument('action',choices=['export','import']);p.add_argument('path',type=Path)
     p=sub.add_parser('pi');p.add_argument('action',choices=['configure','preflight','units','install']);p.add_argument('--directory',type=Path)
     p=sub.add_parser('reports');p.add_argument('action',choices=['status','flush'])
     sub.add_parser('resume-candidates')
@@ -60,6 +61,16 @@ def main(argv=None):
         elif args.command=='backup':
             from .backup import create_backup
             print(json.dumps(create_backup(store,args.path)))
+        elif args.command=='account-vault':
+            import getpass
+            from .account_transfer import export_accounts,import_accounts
+            if not sys.stdin.isatty():raise ValueError('Use an interactive terminal for the transfer passphrase')
+            phrase=getpass.getpass('Credential-transfer passphrase: ')
+            if args.action=='export':
+                if phrase!=getpass.getpass('Confirm passphrase: '):raise ValueError('Passphrases do not match')
+                result=export_accounts(store,args.path.expanduser(),phrase)
+            else:result=import_accounts(store,args.path.expanduser(),phrase)
+            print(json.dumps(result))
         elif args.command=='open-dashboard':
             import webbrowser
             from .server import dashboard_url

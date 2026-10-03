@@ -22,6 +22,7 @@ The `hireme/` package stays flat so existing imports and command wrappers remain
 | Entry points and local desk | `cli.py`, `server.py`, `setup_status.py`, `static/` |
 | Applicant documents and writing | `onboarding.py`, `materials.py`, `letters.py`, `answers.py` |
 | Inference and credentials | `provider.py`, `connections.py` |
+| Employer accounts and encrypted transfer | `accounts.py`, `account_transfer.py` |
 | Application execution | `worker.py`, `browser.py`, `policy.py` |
 | Discovery | `discovery.py`, `portals.py`, `net.py` |
 | Persistence and migration | `store.py`, `config.py`, `backup.py`, `migration.py`, `util.py` |

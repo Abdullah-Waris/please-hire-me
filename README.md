@@ -130,6 +130,17 @@ Do not split one applicant’s history across directories. CLI commands for that
 
 Backups use SQLite’s backup API, include documents/history/evidence, verify checksums on restore, and restore **paused**. They exclude integration credentials, account keys and browser sessions: reconnect those on the destination. The archive contains personal information and is **not encrypted**; store it securely. SD cards can fail; keep an off-device copy and test a restore.
 
+If the worker created employer accounts, transfer their generated passwords separately:
+
+```bash
+# Source instance: pause and export using a NEW filename outside the repository.
+.venv/bin/python -m hireme account-vault export /absolute/private/accounts.encrypted
+# Destination: restore history first, then import into that same paused instance.
+.venv/bin/python -m hireme --data-dir /absolute/path/new-private account-vault import /absolute/private/accounts.encrypted
+```
+
+These commands prompt for a transfer passphrase in an interactive terminal; export asks twice. Use at least 12 characters and retain the passphrase separately. The transfer uses [Fernet with an Argon2id-derived key](https://cryptography.io/en/latest/fernet/#using-passwords-with-fernet), with a fixed 64 MiB derivation memory cost. Import validates the applicant and every account against restored history, rejects conflicting credentials before any writes, and preserves uncertain states. Interrupted imports can be repeated. It does not transfer Gmail/API credentials or browser sessions, enable submissions, or create accounts. Remove the transfer file from both machines after verifying recovery.
+
 ## Optional Gmail
 
 Being signed into Gmail in Chromium does not authorize background access. Create your own Google Cloud project, enable Gmail API, configure OAuth consent, and download a **Desktop app OAuth client JSON**. Upload it under Email automation, then run on the worker’s machine:
