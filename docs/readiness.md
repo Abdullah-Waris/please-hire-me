@@ -128,3 +128,7 @@ Preferences can inspect an uploaded history ZIP through the existing full restor
 Synthetic tests cover history beyond snapshot limits, unresolved outcomes/accounts, unconfirmed identity, hash damage, missing referenced files, invalid ZIPs, interrupted/bounded uploads, temporary cleanup, authenticated HTTP access, read-only demo denial, connection retry, stable reports across refreshes and mobile overflow.
 
 All 485 tests passed with the standard pytest executable after making shared synthetic test imports an explicit package. The expanded form and completed report, including long synthetic applicant details, passed selected accessibility/overflow checks at 1440, 390 and 320 pixels.
+
+### Clear errors for damaged backup formats
+
+Restore now validates manifest types, exact version integers, bounded file sizes and SHA-256 fields before interpreting entries, and rejects duplicate JSON fields at every level. Encrypted ZIPs and unsupported/corrupt compressed reads receive actionable messages. Sixteen synthetic format cases and a CLI failure test verify readable errors and staging cleanup. All 60 relevant backup/account tests and two dashboard backup/authentication checks passed after this change.

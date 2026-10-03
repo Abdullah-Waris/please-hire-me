@@ -115,3 +115,66 @@ def test_backup_preserves_unreadable_legacy_package_text_for_recovery(store,job,
     restored=Store(restored_root)
     try:assert restored.db.execute('SELECT package FROM applications WHERE id=?',(aid,)).fetchone()[0]==raw
     finally:restored.close()
+
+
+@pytest.mark.parametrize('manifest', [
+    'null', '[]', '{"version":true,"files":{}}', '{"version":1.0,"files":{}}',
+    '{"version":1,"files":[]}', '{"version":1,"files":{"ledger.sqlite3":null}}',
+    '{"version":1,"files":{"ledger.sqlite3":{"bytes":true,"sha256":"'+'a'*64+'"}}}',
+    '{"version":1,"files":{"ledger.sqlite3":{"bytes":-1,"sha256":"'+'a'*64+'"}}}',
+    '{"version":1,"files":{"ledger.sqlite3":{"bytes":1,"sha256":"invalid"}}}',
+    '{"version":1,"version":1,"files":{}}',
+    '{"version":1,"files":{},"files":{}}',
+    '{"version":1,"files":{"ledger.sqlite3":{"bytes":1,"bytes":2,"sha256":"'+'a'*64+'"}}}',
+    '['*1500 + '0' + ']'*1500,
+    b'\xff',
+])
+def test_malformed_manifest_is_rejected_cleanly_before_exposing_a_restore(tmp_path, manifest):
+    archive = tmp_path / 'malformed.zip'
+    with zipfile.ZipFile(archive, 'w') as output:
+        output.writestr('manifest.json', manifest)
+        output.writestr('ledger.sqlite3', b'not a ledger')
+    with pytest.raises(ValueError, match='manifest'):
+        restore_backup(archive, tmp_path / 'destination')
+    assert not (tmp_path / 'destination').exists()
+    assert not list(tmp_path.glob('.restore-*'))
+
+
+@pytest.mark.parametrize('invalid_zip', ['encrypted', 'unsupported-compression'])
+def test_zip_format_errors_are_actionable_and_leave_no_restore(store, tmp_path, invalid_zip):
+    import struct
+    archive = tmp_path / 'original.zip'
+    create_backup(store, archive)
+    data = bytearray(archive.read_bytes())
+    # Set the format fields on every local/central header while preserving
+    # manifest bytes. No actual credentials or encrypted owner data are used.
+    with zipfile.ZipFile(archive) as source:
+        local_offsets = [entry.header_offset for entry in source.infolist()]
+    central_offsets = []
+    offset = data.find(b'PK\x01\x02')
+    while offset != -1:
+        central_offsets.append(offset)
+        lengths = struct.unpack_from('<HHH', data, offset + 28)
+        offset += 46 + sum(lengths)
+        if data[offset:offset+4] != b'PK\x01\x02': break
+    for offset in local_offsets:
+        struct.pack_into('<H', data, offset + (6 if invalid_zip == 'encrypted' else 8), 1 if invalid_zip == 'encrypted' else 99)
+    for offset in central_offsets:
+        struct.pack_into('<H', data, offset + (8 if invalid_zip == 'encrypted' else 10), 1 if invalid_zip == 'encrypted' else 99)
+    bad = tmp_path / 'unsupported.zip'; bad.write_bytes(data)
+    with pytest.raises(ValueError, match='Encrypted ZIP|Cannot read this backup ZIP'):
+        restore_backup(bad, tmp_path / 'destination')
+    assert not (tmp_path / 'destination').exists()
+    assert not list(tmp_path.glob('.restore-*'))
+
+
+def test_cli_reports_invalid_backup_without_initializing_destination(tmp_path, capsys):
+    from hireme.cli import main
+    archive = tmp_path / 'wrong-file.zip'
+    with zipfile.ZipFile(archive, 'w') as output:
+        output.writestr('manifest.json', 'null')
+    destination = tmp_path / 'new-private'
+    assert main(['--data-dir', str(destination), 'restore', str(archive)]) == 2
+    result = capsys.readouterr()
+    assert 'Unsupported backup manifest' in result.err and not result.out
+    assert not destination.exists() and not list(tmp_path.glob('.restore-*'))

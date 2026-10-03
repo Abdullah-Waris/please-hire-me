@@ -9,9 +9,37 @@ import shutil
 import sqlite3
 import tempfile
 import zipfile
+import zlib
 from pathlib import Path, PurePosixPath
 
 from .store import Store, worker_lock
+
+
+def _read_member(archive, name):
+    try:
+        return archive.read(name)
+    except (RuntimeError, NotImplementedError, OSError, zlib.error):
+        raise ValueError('Cannot read this backup ZIP. Choose the original history backup downloaded from Application desk.') from None
+
+
+def _manifest(data):
+    def unique(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError('Backup manifest contains duplicate fields')
+            result[key] = value
+        return result
+    try:
+        manifest = json.loads(data, object_pairs_hook=unique)
+    except (UnicodeDecodeError, json.JSONDecodeError, RecursionError):
+        raise ValueError('Backup manifest cannot be read') from None
+    if not isinstance(manifest, dict) or type(manifest.get('version')) is not int or manifest['version'] != 1 or not isinstance(manifest.get('files'), dict):
+        raise ValueError('Unsupported backup manifest. Choose a history backup created by Application desk.')
+    for info in manifest['files'].values():
+        if not isinstance(info, dict) or type(info.get('bytes')) is not int or not 0 <= info['bytes'] <= 256*1024*1024 or not isinstance(info.get('sha256'), str) or not re.fullmatch(r'[a-f0-9]{64}', info['sha256']):
+            raise ValueError('Backup manifest has invalid file checksums or sizes')
+    return manifest
 
 
 def _validate_references(store):
@@ -104,10 +132,12 @@ def restore_backup(archive_path: Path, destination: Path):
             names=[e.filename for e in entries]
             if len(entries)>50000 or len(names)!=len(set(names)) or sum(e.file_size for e in entries)>2*1024*1024*1024:
                 raise ValueError('Invalid or excessive backup archive')
+            if any(entry.flag_bits & 1 for entry in entries):
+                raise ValueError('Encrypted ZIP archives are not supported. Choose the original history backup; encrypted employer passwords use the separate transfer.')
             if 'manifest.json' not in names or archive.getinfo('manifest.json').file_size>8*1024*1024:
                 raise ValueError('Backup manifest is missing or too large')
-            manifest=json.loads(archive.read('manifest.json'))
-            if manifest.get('version')!=1 or set(manifest.get('files',{}))|{'manifest.json'}!=set(names):
+            manifest=_manifest(_read_member(archive,'manifest.json'))
+            if set(manifest['files'])|{'manifest.json'}!=set(names):
                 raise ValueError('Backup does not match its manifest')
             for name,info in manifest['files'].items():
                 p=PurePosixPath(name)
@@ -117,7 +147,9 @@ def restore_backup(archive_path: Path, destination: Path):
                     raise ValueError('Unapproved backup member')
                 if archive.getinfo(name).file_size>256*1024*1024:
                     raise ValueError('Backup member is too large')
-                data=archive.read(name)
+                if archive.getinfo(name).file_size != info['bytes']:
+                    raise ValueError('Backup checksum mismatch')
+                data=_read_member(archive,name)
                 if len(data)!=info.get('bytes') or hashlib.sha256(data).hexdigest()!=info.get('sha256'):
                     raise ValueError('Backup checksum mismatch')
                 target=staging/name;target.parent.mkdir(parents=True,exist_ok=True,mode=0o700)
