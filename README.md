@@ -28,7 +28,7 @@ The current workspace improvements are on the **codex/application-workspace-inte
 Requires **Python 3.11+**, Git, and macOS or Linux. On Windows use a supported Linux environment such as WSL2; the worker uses POSIX file locks. Model inference runs remotely through your selected provider, not on a local GPU.
 
 ```bash
-git clone --branch codex/application-workspace-integration https://github.com/hoverdart/please-hire-me.git
+git clone --branch codex/application-workspace-integration https://github.com/Abdullah-Waris/please-hire-me.git
 cd please-hire-me
 ./setup.sh
 ```
