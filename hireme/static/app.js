@@ -1173,7 +1173,9 @@ function renderRuns() {
           .map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`)
           .join("; ");
       detail =
-        `${data.confirmed || 0} submitted · ${data.attempts || 0} attempted. ${outcomes} ${reason}`.trim();
+        data.mode === "discovery"
+          ? `Opportunity search · ${data.added || 0} new listings · No submissions.${data.time_limit_reached ? " Search time limit reached." : ""} ${reason}`.trim()
+          : `${data.confirmed || 0} submitted · ${data.attempts || 0} attempted. ${outcomes} ${reason}`.trim();
     } catch {}
     row.append(
       el("span", date(run.started)),
@@ -1209,9 +1211,11 @@ function render() {
   $("#worker-state").textContent = state.demo
     ? "Read-only sample workspace"
     : state.worker_running
-      ? state.settings.live_enabled
-        ? "Batch running"
-        : "Pausing active batch…"
+      ? state.worker_mode === "discovery"
+        ? "Finding opportunities…"
+        : state.settings.live_enabled
+          ? "Batch running"
+          : "Pausing active batch…"
       : state.worker_recovery?.recovery_needed
         ? "Recovery needed"
         : !state.settings.onboarding_complete || state.missing_setup.length > 0
@@ -1219,11 +1223,21 @@ function render() {
           : state.settings.live_enabled
             ? "Automatic submissions enabled"
             : "Submissions paused";
-  $("#pause").textContent = state.settings.live_enabled ? "Pause" : "Resume";
+  const finding = state.worker_running && state.worker_mode === "discovery";
+  $("#pause").textContent = finding
+    ? "Stop search & pause"
+    : state.settings.live_enabled
+      ? "Pause"
+      : "Resume";
   $("#pause").disabled =
     state.demo ||
-    (!state.settings.live_enabled &&
+    (!finding &&
+      !state.settings.live_enabled &&
       (!state.settings.onboarding_complete || state.missing_setup.length > 0));
+  $("#discover").disabled =
+    state.demo ||
+    state.worker_running ||
+    state.worker_recovery?.recovery_needed;
   $("#run").disabled =
     state.demo ||
     state.worker_recovery?.recovery_needed ||
@@ -1397,7 +1411,10 @@ $("#complete-setup").onclick = async () => {
 $("#pause").onclick = async () => {
   try {
     await api(
-      state.settings.live_enabled ? "/api/pause" : "/api/resume-worker",
+      state.settings.live_enabled ||
+        (state.worker_running && state.worker_mode === "discovery")
+        ? "/api/pause"
+        : "/api/resume-worker",
       {},
     );
     await refresh();
@@ -1412,6 +1429,17 @@ $("#run").onclick = async () => {
     await refresh();
   } catch (e) {
     note(e.message, true);
+  }
+};
+$("#discover").onclick = async () => {
+  try {
+    await api("/api/discover", {});
+    note(
+      "Finding public opportunities. This search does not prepare or submit applications.",
+    );
+    await refresh();
+  } catch (error) {
+    note(error.message, true);
   }
 };
 $("#job-form").onsubmit = async (e) => {
@@ -2270,6 +2298,7 @@ document.addEventListener(
 for (const id of [
   "pause",
   "run",
+  "discover",
   "complete-setup",
   "finish-paused",
   "finish-start",

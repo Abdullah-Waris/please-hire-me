@@ -50,3 +50,20 @@ def test_paused_network_does_not_open_any_request(monkeypatch):
     n=Network(checkpoint=paused)
     monkeypatch.setattr(n.opener,'open',lambda *args,**kwargs:pytest.fail('Paused discovery must not send a request'))
     with pytest.raises(Blocked,match='paused'):n.fetch('https://jobs.lever.co/acme')
+
+
+def test_discovery_retry_cannot_send_after_deadline(monkeypatch):
+    import urllib.error
+    from hireme import net
+    clock = [9]
+    monkeypatch.setattr(net.time, 'monotonic', lambda: clock[0])
+    monkeypatch.setattr(net.time, 'sleep', lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+    network = net.Network(deadline=10)
+    requests = []
+    def unavailable(request, **kwargs):
+        requests.append(request)
+        raise urllib.error.HTTPError(request.full_url, 503, 'fixture unavailable', {}, None)
+    monkeypatch.setattr(network.opener, 'open', unavailable)
+    with pytest.raises(Blocked, match='discovery_deadline'):
+        network.fetch('https://jobs.lever.co/acme')
+    assert len(requests) == 1

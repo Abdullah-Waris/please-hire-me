@@ -14,6 +14,69 @@ def launch(root,repo,port):
     serve(Path(root),Path(repo),port,token="fixture-capability")
 
 
+def launch_discovery_fixture(root, repo, port):
+    from hireme import opportunity_search
+    from hireme.discovery import posting
+    def collect(store, net):
+        store.upsert_job(posting('https://jobs.lever.co/acme/search-fixture', 'Acme', 'Engineer', 'US', 'fixture'))
+        for _ in range(500):
+            net.checkpoint()
+            if (store.root / 'finish-search').exists(): return
+            time.sleep(.01)
+    opportunity_search.sweep_lists = collect
+    opportunity_search.sweep_portals = lambda *args: None
+    opportunity_search.sweep_boards = lambda *args, **kwargs: None
+    launch(root, repo, port)
+
+
+def test_find_opportunities_and_stop_without_enabling_submissions(tmp_path):
+    from playwright.sync_api import sync_playwright, expect
+    from hireme.store import Store
+    root = tmp_path / 'private'
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch_discovery_fixture, args=(str(root), str(Path(__file__).parent.parent), port))
+    process.start(); base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 320, 'height': 800}); errors = []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(base + '/#token=fixture-capability')
+            expect(page.locator('#discover')).to_be_enabled()
+            expect(page.locator('#run')).to_be_disabled()
+            expect(page.locator('#pause')).to_be_disabled()
+            assert page.request.post(base + '/api/discover', data={}).status == 403
+            page.locator('#discover').click()
+            expect(page.locator('#worker-state')).to_have_text('Finding opportunities…')
+            expect(page.locator('#discover')).to_be_disabled()
+            expect(page.locator('#pause')).to_have_text('Stop search & pause')
+            assert page.request.post(base + '/api/discover', data={}, headers={'X-Hireme-Token': 'fixture-capability'}).status == 400
+            page.locator('#pause').click()
+            page.evaluate('refresh()')
+            expect(page.locator('#discover')).to_be_enabled()
+            expect(page.locator('#run')).to_be_disabled()
+            store = Store(root)
+            assert not store.settings()['live_enabled'] and not store.settings()['onboarding_complete']
+            assert store.db.execute('SELECT status FROM runs').fetchone()[0] == 'paused'
+            assert store.db.execute('SELECT COUNT(*) FROM applications').fetchone()[0] == 0
+            (root / 'finish-search').touch()
+            page.locator('#discover').click()
+            page.evaluate('refresh()')
+            expect(page.locator('#discover')).to_be_enabled()
+            expect(page.locator('#runs')).to_contain_text('Opportunity search')
+            expect(page.locator('#runs')).to_contain_text('No submissions')
+            assert not store.settings()['live_enabled']
+            assert store.db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0] == 1
+            assert store.db.execute('SELECT COUNT(*) FROM model_requests').fetchone()[0] == 0
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            assert not errors
+            store.close(); browser.close()
+    finally:
+        process.terminate(); process.join(5)
+
+
 def test_dashboard_capability_csrf_host_and_xss(tmp_path):
     sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
     process=multiprocessing.Process(target=launch,args=(str(tmp_path/'private'),str(Path(__file__).parent.parent),port))

@@ -107,6 +107,9 @@ class Store:
         return self.db.execute('SELECT generation FROM worker_control WHERE id=1').fetchone()[0]
 
     def checkpoint(self):
+        discovery_generation=getattr(self,'discovery_generation',None)
+        if discovery_generation is not None and discovery_generation!=self.control_generation():
+            raise Blocked('paused')
         generation=getattr(self,'run_generation',None)
         if generation is not None and (generation!=self.control_generation() or not self.settings()['live_enabled']):
             raise Blocked('paused')

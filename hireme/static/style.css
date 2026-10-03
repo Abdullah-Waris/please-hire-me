@@ -1174,6 +1174,10 @@ pre {
   }
   .page-head > .actions {
     width: 100%;
+    flex-wrap: wrap;
+  }
+  .page-head > .actions #discover {
+    flex-basis: 100%;
   }
   .page-head > .actions button {
     flex: 1;
