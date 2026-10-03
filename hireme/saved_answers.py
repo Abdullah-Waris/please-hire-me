@@ -33,6 +33,6 @@ def revoke_answer(store, answer_id):
         if not store.db.execute('SELECT 1 FROM answers WHERE id=?', (answer_id,)).fetchone():
             raise ValueError('Saved answer not found')
         store.db.execute('DELETE FROM answers WHERE id=?', (answer_id,))
-        store.db.execute("DELETE FROM applications WHERE state='prepared'")
+        store.discard_prepared()
         store.event('answer_revoked', answer_id, {})
     store.export_config()

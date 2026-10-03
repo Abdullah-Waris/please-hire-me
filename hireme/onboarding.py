@@ -25,10 +25,7 @@ def import_resume(store,path:Path,kind='resume'):
         parts.append(part)
     text='\n'.join(parts)
     if kind=='resume' and not text.strip():raise ValueError('Resume needs selectable text; supply an accessible text PDF')
-    h=hashlib.sha256(data).hexdigest();dest=private_dir(store.root/'documents')/(h+'.pdf')
-    write_private_blob(dest,data)
-    store.db.execute('INSERT INTO documents VALUES(?,?,?) ON CONFLICT(kind) DO UPDATE SET hash=excluded.hash,filename=excluded.filename',(kind,h,dest.name))
-    store.event('document_imported',kind,{'hash':h})
+    h=hashlib.sha256(data).hexdigest()
     candidates={}
     if kind=='resume':
         lines=[l.strip() for l in text.splitlines() if l.strip()]
@@ -57,11 +54,27 @@ def import_resume(store,path:Path,kind='resume'):
             for line in section.splitlines():
                 if ':' in line:skills.extend(x.strip() for x in line.split(':',1)[1].split(',') if x.strip())
             if skills:candidates['skills']=', '.join(skills)
-        # Candidate facts require a single confirmation pass; parsing never approves legal status.
-        store.put_facts(candidates,source='resume:'+h,confirmed=False)
         private_dir(store.root/'config')
         p=store.root/'config'/'resume.txt'
         if p.is_symlink():raise ValueError('Unsafe resume text destination')
+    with store.transaction():
+        known=store.facts(False)
+        proposals={key:validate_fact(key,value) for key,value in candidates.items()}
+        proposals={key:value for key,value in proposals.items()
+                   if not (known.get(key,{}).get('confirmed') and known[key]['value']==value)}
+        # Exact existing confirmations remain authoritative. New/changed values
+        # require review; identity rejection precedes selecting the new PDF.
+        if proposals:store.put_facts(proposals,source='resume:'+h,confirmed=False)
+        dest=private_dir(store.root/'documents')/(h+'.pdf')
+        write_private_blob(dest,data)
+        previous=store.db.execute('SELECT hash FROM documents WHERE kind=?',(kind,)).fetchone()
+        if previous and previous['hash']!=h:
+            from .document_controls import invalidate_document_drafts
+            invalidate_document_drafts(store,kind)
+        store.db.execute('INSERT INTO documents VALUES(?,?,?) ON CONFLICT(kind) DO UPDATE SET hash=excluded.hash,filename=excluded.filename',(kind,h,dest.name))
+        store.event('document_imported',kind,{'hash':h})
+    if proposals:store.export_config()
+    if kind=='resume':
         p.write_text(text);os.chmod(p,0o600)
     return {'hash':h,'candidates':candidates,'text':text}
 

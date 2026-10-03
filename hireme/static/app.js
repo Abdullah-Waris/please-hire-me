@@ -2110,7 +2110,7 @@ $("#resume-upload").onchange = async (e) => {
   try {
     await api("/api/resume", f, true);
     note(
-      "Resume imported. Confirm its extracted values and supply the remaining facts.",
+      "Resume imported. Confirm any new or changed extracted values and supply the remaining facts.",
     );
     await refresh();
   } catch (e) {

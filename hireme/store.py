@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import fcntl
 import json
+from itertools import islice
 import os
 import re
 import sqlite3
@@ -94,12 +95,15 @@ class Store:
 
     @contextlib.contextmanager
     def transaction(self):
-        self.db.execute("BEGIN IMMEDIATE")
+        nested=self.db.in_transaction
+        savepoint='hireme_'+uuid.uuid4().hex if nested else None
+        self.db.execute('SAVEPOINT '+savepoint if nested else 'BEGIN IMMEDIATE')
         try:
             yield
-            self.db.execute("COMMIT")
+            self.db.execute('RELEASE SAVEPOINT '+savepoint if nested else 'COMMIT')
         except BaseException:
-            self.db.execute("ROLLBACK")
+            self.db.execute('ROLLBACK TO SAVEPOINT '+savepoint if nested else 'ROLLBACK')
+            if nested:self.db.execute('RELEASE SAVEPOINT '+savepoint)
             raise
 
     def settings(self):
@@ -123,6 +127,7 @@ class Store:
             raise Blocked('cycle_timeout','The batch time budget was reached')
 
     def reserve_model_request(self):
+        if self.db.in_transaction:raise Blocked('model_request_transaction','Reserve model requests outside applicant-data transactions')
         with self.transaction():
             self.checkpoint()
             s=self.settings();rid=getattr(self,'active_run_id',None) or 'setup:'+datetime.now(ZoneInfo(s['timezone'])).date().isoformat()
@@ -193,13 +198,27 @@ class Store:
                     self.db.execute("UPDATE worker_control SET generation=generation+1 WHERE id=1")
                     self.event("pause_requested", "worker", {'reason': 'required_fact_removed'})
             self.event("facts_confirmed" if confirmed else "facts_proposed", "profile", sorted(values))
-            self.db.execute("DELETE FROM applications WHERE state='prepared'")
-        self.export_config()
+            self.discard_prepared()
+        if not self.db.in_transaction:self.export_config()
 
     def export_config(self):
         atomic_json(self.root / "config" / "profile.json", {k:v["value"] for k,v in self.facts().items()})
         atomic_json(self.root / "config" / "settings.json", self.settings())
         atomic_json(self.root / "config" / "answers.json", [dict(x) for x in self.db.execute("SELECT * FROM answers")])
+
+    def discard_prepared(self,job_ids=None):
+        """Caller owns a transaction. Reset only jobs whose unattempted draft is removed."""
+        def group(ids=None):
+            clause="state='prepared'";parameters=[]
+            if ids is not None:
+                clause+=' AND job_id IN ('+','.join('?' for _ in ids)+')';parameters.extend(ids)
+            self.db.execute("UPDATE jobs SET status='discovered',reason='',updated=? WHERE status='prepared' AND id IN (SELECT job_id FROM applications WHERE "+clause+')',(now(),*parameters))
+            return self.db.execute('DELETE FROM applications WHERE '+clause,parameters).rowcount
+        if job_ids is None:return group()
+        identifiers=iter(job_ids);count=0
+        size=min(500,max(1,self.db.getlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER)-1))
+        while batch:=list(islice(identifiers,size)):count+=group(batch)
+        return count
 
     def missing_setup(self):
         missing = sorted(REQUIRED - self.facts().keys())
@@ -277,14 +296,14 @@ class Store:
         with self.transaction():
             self._user_template(tid)
             self.put_template(category, body, tid)
-            self.db.execute("DELETE FROM applications WHERE state='prepared'")
+            self.discard_prepared()
         return tid
 
     def revoke_template(self, tid):
         with self.transaction():
             row = self._user_template(tid)
             self.db.execute('DELETE FROM templates WHERE id=?', (tid,))
-            self.db.execute("DELETE FROM applications WHERE state='prepared'")
+            self.discard_prepared()
             self.event('template_revoked', tid, {'category': row['category']})
 
     def templates(self):

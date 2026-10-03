@@ -39,3 +39,20 @@ def test_transcript_withdrawal_refuses_an_active_worker_without_mutation(store):
     with worker_lock(store.root):
         with pytest.raises(Blocked):withdraw_transcript(store)
     assert store.db.execute("SELECT 1 FROM documents WHERE kind='transcript'").fetchone()
+
+
+def test_transcript_withdrawal_handles_a_small_sql_parameter_limit(store,job,package):
+    import sqlite3
+    resume=package['documents'][0]
+    store.db.execute('INSERT INTO documents VALUES(?,?,?)',('transcript',resume['hash'],resume['filename']))
+    for index in range(20):
+        candidate={**job,'id':digest(index),'url':job['url']+str(index),'company':'Other '+str(index)}
+        store.upsert_job(candidate)
+        store.prepare(candidate,{**package,'job_id':candidate['id'],'url':candidate['url'],
+                                 'documents':[*package['documents'],{**resume,'kind':'transcript'}]})
+        store.db.execute("UPDATE jobs SET status='prepared' WHERE id=?",(candidate['id'],))
+    previous=store.db.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER,10)
+    try:assert withdraw_transcript(store)=={'removed':True,'drafts_removed':20}
+    finally:store.db.setlimit(sqlite3.SQLITE_LIMIT_VARIABLE_NUMBER,previous)
+    assert not store.db.execute('SELECT * FROM applications').fetchone()
+    assert not store.db.execute("SELECT 1 FROM jobs WHERE status='prepared'").fetchone()
