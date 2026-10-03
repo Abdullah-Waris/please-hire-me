@@ -200,6 +200,13 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     try:result=search_sources(store,search=query.get('search',[''])[0],status=query.get('status',['all'])[0],offset=int(query.get('offset',['0'])[0]))
                     except ValueError as error:return self.send(400,{'error':str(error)})
                     return self.send(200,result)
+                if path.startswith('/api/application-document/'):
+                    from .document_downloads import recorded_pdf
+                    parts=path[len('/api/application-document/'):].split('/')
+                    if len(parts)!=3:return self.send(400,{'error':'Choose a recorded PDF'})
+                    try:data,name=recorded_pdf(store,unquote(parts[0]),int(parts[1]),parts[2])
+                    except ValueError as error:return self.send(400,{'error':str(error)})
+                    return self.send(200,data,'application/pdf',download=name)
                 if path.startswith('/api/application/'):
                     try:record=store.application_record(unquote(path[len('/api/application/'):]))
                     except ValueError as error:return self.send(400,{'error':str(error)})

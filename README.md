@@ -87,6 +87,8 @@ To reverse an exclusion, open an opportunity’s details and choose **Include th
 
 Unresolved submission outcomes have their own search, state filter and 25-record pages, ordered by the oldest attempt first. Employer context remains available beyond snapshot limits, without loading answer packages. Choose the outcome you actually verified and provide evidence before recording it. “No submission occurred” remains held for manual handling; recording an outcome does not resume submissions or retry an application.
 
+Within **Answers & evidence**, **Recorded documents** lets you download the exact resume, transcript or generated cover-letter PDF saved with that draft or attempt. Downloads verify the recorded file hash rather than using today’s upload. Missing or changed files show repair guidance, and failed downloads can be retried locally. Keep downloaded applicant documents private.
+
 Open **Saved answers & evidence** within an unresolved outcome to inspect its recorded note, answers, sources and available confirmation image. Answer packages load only when opened; failed loads can be retried locally. Open evidence and keyboard focus survive ordinary refreshes, and a changed record refreshes the evidence cache.
 
 The held-opportunity section in **Needs you** previews up to 12 records and shows the total across your ledger. **View all held opportunities** opens the complete searchable, paginated list in Overview. Ordinary eligibility mismatches and company exclusions stay out of this attention count.

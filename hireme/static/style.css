@@ -1737,3 +1737,19 @@ pre {
   color: #684619;
   font-size: 14px;
 }
+
+.recorded-documents {
+  margin: 18px 0;
+  padding-top: 16px;
+  border-top: 1px solid var(--rule);
+}
+.recorded-document {
+  margin: 12px 0;
+}
+.recorded-document button {
+  max-width: 100%;
+  white-space: normal;
+}
+.recorded-document p {
+  margin: 6px 0;
+}

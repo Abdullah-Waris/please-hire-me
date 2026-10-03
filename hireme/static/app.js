@@ -485,6 +485,103 @@ function renderEvidence(app, parent) {
   if (!parsed.answers.length)
     list.append(el("li", "No recorded answers for this attempt."));
   parent.replaceChildren(list);
+  if (Array.isArray(parsed.documents) && parsed.documents.length) {
+    const documents = el("div", undefined, "recorded-documents");
+    documents.append(
+      el("h3", "Recorded documents"),
+      el(
+        "p",
+        "Download the exact PDF recorded with this draft or attempt. Current uploads may have changed since then.",
+        "help",
+      ),
+    );
+    parsed.documents.forEach((attachment, index) => {
+      const names = {
+        resume: "resume",
+        transcript: "transcript",
+        cover_letter: "cover letter",
+      };
+      if (
+        !attachment ||
+        typeof attachment.kind !== "string" ||
+        typeof attachment.hash !== "string" ||
+        !Object.hasOwn(names, attachment.kind) ||
+        !/^[a-f0-9]{64}$/.test(attachment.hash || "") ||
+        attachment.filename !== attachment.hash + ".pdf"
+      ) {
+        documents.append(
+          el("p", "A recorded document's details could not be read.", "help"),
+        );
+        return;
+      }
+      const row = el("div", undefined, "recorded-document"),
+        button = el(
+          "button",
+          "Download recorded " + names[attachment.kind],
+          "secondary",
+        ),
+        feedback = el("p", "", "help");
+      button.type = "button";
+      feedback.setAttribute("role", "status");
+      if (attachment.generated === true)
+        row.append(el("p", "Generated for this opportunity", "help"));
+      button.onclick = async () => {
+        if (button.disabled) return;
+        const returnFocus = document.activeElement === button;
+        button.disabled = true;
+        feedback.textContent = "Preparing your PDF download…";
+        feedback.setAttribute("role", "status");
+        try {
+          const response = await fetch(
+            `/api/application-document/${encodeURIComponent(app.id)}/${index}/${attachment.hash}`,
+            { headers: { "X-Hireme-Token": token } },
+          ).catch(() => {
+            throw new Error(
+              "Cannot reach your application desk. Check that the dashboard is still running, then try again.",
+            );
+          });
+          if (!response.ok) {
+            const error = await response.json().catch(() => null);
+            throw new Error(
+              error?.error || "The recorded PDF could not be downloaded.",
+            );
+          }
+          if (
+            response.headers.get("Content-Type")?.split(";")[0] !==
+            "application/pdf"
+          )
+            throw new Error(
+              "The server did not return a PDF. Reconnect and try again.",
+            );
+          const url = URL.createObjectURL(await response.blob()),
+            anchor = document.createElement("a");
+          anchor.href = url;
+          anchor.download =
+            attachment.kind === "cover_letter"
+              ? "cover-letter.pdf"
+              : attachment.kind + ".pdf";
+          anchor.click();
+          setTimeout(() => URL.revokeObjectURL(url), 1000);
+          feedback.textContent =
+            "PDF downloaded. Keep this private document in a safe location.";
+        } catch (error) {
+          feedback.textContent = `${error.message} You can try the download again.`;
+          feedback.setAttribute("role", "alert");
+        } finally {
+          button.disabled = false;
+          if (
+            returnFocus &&
+            button.isConnected &&
+            document.activeElement === document.body
+          )
+            button.focus({ preventScroll: true });
+        }
+      };
+      row.append(button, feedback);
+      documents.append(row);
+    });
+    parent.append(documents);
+  }
   if (app.screenshot) {
     const button = el("button", "View confirmation", "secondary"),
       feedback = el("p", "", "help");

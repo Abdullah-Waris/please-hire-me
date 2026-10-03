@@ -1110,6 +1110,13 @@ def test_demo_is_read_only_and_export_requires_auth(tmp_path):
                 page.locator('#export-ledger').click()
             assert download.value.suggested_filename == 'application-ledger.csv'
             assert not download.value.failure()
+            page.locator('#jobs details[data-evidence-id="demo-application-0"]').evaluate('(element)=>element.open=true')
+            with page.expect_download() as sample:
+                page.get_by_role('button',name='Download recorded cover letter',exact=True).click()
+            assert sample.value.suggested_filename=='cover-letter.pdf'
+            from pypdf import PdfReader
+            text=PdfReader(sample.value.path()).pages[0].extract_text()
+            assert 'No application was sent' in text and 'Sample Applicant' in text
             page.locator('[data-view=setup]').click()
             page.locator('#setup-diagnostics').evaluate('(element)=>element.open=true')
             page.locator('#check-setup').click()
@@ -1809,4 +1816,48 @@ def test_source_library_pages_preserve_edits_and_recover_from_failed_page_load(s
             assert invalid.status==400
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             browser.close()
+    finally: process.terminate(); process.join(5)
+
+
+def test_recorded_pdf_download_auth_binding_and_local_retry(store,job,package):
+    from playwright.sync_api import sync_playwright,expect
+    aid=store.prepare(job,package); document=package['documents'][0]
+    expected=(store.root/'documents'/document['filename']).read_bytes()
+    sock=socket.socket(); sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]; sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port)); process.start()
+    base=f'http://127.0.0.1:{port}'
+    url=base+f"/api/application-document/{aid}/0/{document['hash']}"
+    before=store.snapshot(); changes=store.db.total_changes
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch(); page=browser.new_page(viewport={'width':320,'height':844},accept_downloads=True)
+            assert page.request.get(url).status==403
+            response=page.request.get(url,headers={'X-Hireme-Token':'fixture-capability'})
+            assert response.status==200 and response.body()==expected
+            assert response.headers['content-disposition']=='attachment; filename="resume.pdf"'
+            changed=page.request.get(base+f"/api/application-document/{aid}/0/"+'b'*64,headers={'X-Hireme-Token':'fixture-capability'})
+            assert changed.status==400
+            page.goto(base+'/#token=fixture-capability')
+            page.locator('#jobs details[data-evidence-id]').first.evaluate('(element)=>element.open=true')
+            button=page.get_by_role('button',name='Download recorded resume',exact=True)
+            expect(button).to_be_visible()
+            with page.expect_download() as download: button.click()
+            assert download.value.suggested_filename=='resume.pdf'
+            assert Path(download.value.path()).read_bytes()==expected
+            page.route('**/api/application-document/**',lambda route:route.fulfill(status=503,content_type='application/json',body='{"error":"Synthetic interrupted PDF download"}'))
+            button.click(); expect(page.locator('.recorded-document [role=alert]')).to_contain_text('Synthetic interrupted')
+            expect(button).to_be_enabled(); expect(button).to_be_focused()
+            page.unroute('**/api/application-document/**')
+            page.route('**/api/application-document/**',lambda route:route.abort())
+            button.click(); expect(page.locator('.recorded-document [role=alert]')).to_contain_text('Cannot reach your application desk')
+            expect(button).to_be_enabled(); expect(button).to_be_focused()
+            page.unroute('**/api/application-document/**')
+            with page.expect_download() as retry: button.click()
+            assert Path(retry.value.path()).read_bytes()==expected
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            browser.close()
+        assert store.snapshot()==before and store.db.total_changes==changes
     finally: process.terminate(); process.join(5)

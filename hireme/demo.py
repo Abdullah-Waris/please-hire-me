@@ -2,13 +2,14 @@
 from __future__ import annotations
 
 import json
+import hashlib
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
 from .discovery import posting, source_result
 from .store import Store
-from .util import now
+from .util import now, private_dir, write_private_blob
 
 
 DEMO_READINESS = {
@@ -32,6 +33,11 @@ def seed(store):
         ('Openwater', 'Developer Intern', 'New York, NY', 'discovered', 78, ''),
     ]
     stamp = now()
+    from .letters import render_letter
+    sample_pdf = render_letter('Sample Applicant', 'Read-only synthetic preview', 'Cedar Labs', 'Software Engineer Intern',
+        'This is an invented sample letter for the read-only workspace.\n\nIt demonstrates how recorded document downloads work. These statements do not describe a real applicant.\n\nNo application was sent. Start your own private workspace to prepare documents from your confirmed experience.')
+    sample_hash = hashlib.sha256(sample_pdf).hexdigest()
+    write_private_blob(private_dir(store.root / 'documents') / (sample_hash + '.pdf'), sample_pdf)
     for index, (company, title, location, status, score, reason) in enumerate(entries):
         # Names and requisitions are invented. Links are omitted from the frontend in demo mode.
         job = posting(f'https://jobs.lever.co/synthetic-preview/req-{index}', company, title, location,
@@ -45,7 +51,7 @@ def seed(store):
                 (f'demo-application-{index}', job['id'], store.company(company), status,
                  json.dumps({'answers': [{'field': {'label': 'Experience'},
                     'value': 'This is a synthetic answer in the sample workspace.',
-                    'provenance': {'template_id': 'demo'}}]}), 'demo', stamp, stamp, stamp,
+                    'provenance': {'template_id': 'demo'}}], 'documents': [{'kind': 'cover_letter', 'hash': sample_hash, 'filename': sample_hash + '.pdf', 'generated': True}] if index == 0 else []}), 'demo', stamp, stamp, stamp,
                  'Synthetic confirmation — no application was sent.' if status == 'confirmed' else 'Synthetic unclear outcome — no application was sent.'))
             if index == 0:
                 qid = store.ask(job['id'], job['host'] + '|' + store.company(company),
