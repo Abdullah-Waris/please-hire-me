@@ -199,6 +199,45 @@ def test_unresolved_outcome_pages_preserve_old_context_and_require_explicit_veri
     finally: process.terminate(); process.join(5)
 
 
+def test_outcome_evidence_loads_only_on_request_retries_and_preserves_reading_focus(store, job, package):
+    from playwright.sync_api import sync_playwright, expect
+    aid = store.prepare(job, package); store.begin_submit(aid); store.finish(aid, 'unknown')
+    store.db.execute('UPDATE applications SET confirmation=? WHERE id=?', ('<Synthetic recorded portal note>', aid))
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 320, 'height': 844}); errors = []; requests = []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.on('request', lambda request: requests.append(request.url) if '/api/application/' in request.url else None)
+            page.goto(base + '/#token=fixture-capability'); page.locator('[data-view=questions]').click()
+            expect(page.locator('#uncertain form')).to_have_count(1)
+            assert not requests
+            page.route('**/api/application/' + aid, lambda route: route.fulfill(status=503, json={'error': 'Synthetic evidence failure'}))
+            summary = page.locator('#uncertain details > summary')
+            summary.click()
+            expect(page.locator('#uncertain')).to_contain_text('Synthetic evidence failure')
+            page.unroute('**/api/application/' + aid)
+            page.get_by_role('button', name='Retry evidence', exact=True).click()
+            expect(page.locator('#uncertain .answer-log')).to_contain_text('test@candidate.invalid')
+            expect(page.locator('#uncertain details')).to_contain_text('<Synthetic recorded portal note>')
+            assert len(requests) == 2
+            summary.focus(); page.evaluate('refresh()')
+            expect(summary).to_be_focused(); expect(page.locator('#uncertain details')).to_have_attribute('open', '')
+            assert len(requests) == 2
+            store.db.execute('UPDATE applications SET updated=? WHERE id=?', ('2026-10-04T00:00:00+00:00', aid))
+            page.evaluate('refresh()')
+            expect(summary).to_be_focused(); expect(page.locator('#uncertain .answer-log')).to_contain_text('test@candidate.invalid')
+            assert len(requests) == 3
+            assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            browser.close()
+    finally: process.terminate(); process.join(5)
+
+
 def test_dashboard_capability_csrf_host_and_xss(tmp_path):
     sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
     process=multiprocessing.Process(target=launch,args=(str(tmp_path/'private'),str(Path(__file__).parent.parent),port))

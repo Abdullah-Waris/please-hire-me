@@ -1005,6 +1005,9 @@ function renderOutcomes() {
     return;
   }
   renderedOutcomeSignature = signature;
+  const focusedEvidence = document.activeElement.closest?.(
+    "#uncertain details[data-outcome-evidence]",
+  )?.dataset.outcomeEvidence;
   u.replaceChildren();
   const unknown = outcomeState.applications;
   if (!unknown.length)
@@ -1034,6 +1037,23 @@ function renderOutcomes() {
           "subtle",
         ),
       );
+    const detail = el("details"),
+      summary = el("summary", "Saved answers & evidence"),
+      evidence = el("div"),
+      expansionKey = `outcome:${a.id}`;
+    detail.dataset.outcomeEvidence = a.id;
+    evidence.setAttribute("aria-live", "polite");
+    detail.append(summary);
+    if (a.confirmation) detail.append(el("p", a.confirmation, "help"));
+    detail.append(evidence);
+    detail.ontoggle = () => {
+      if (detail.open) {
+        expandedEvidence.add(expansionKey);
+        loadEvidence(a, evidence);
+      } else expandedEvidence.delete(expansionKey);
+    };
+    detail.open = expandedEvidence.has(expansionKey);
+    box.append(detail);
     const f = el("form"),
       select = el("select");
     select.setAttribute("aria-label", "Verified outcome");
@@ -1095,6 +1115,7 @@ function renderOutcomes() {
     };
     box.append(f);
     u.append(box);
+    if (focusedEvidence === a.id) summary.focus({ preventScroll: true });
   }
   updateOutcomeControls();
 }
