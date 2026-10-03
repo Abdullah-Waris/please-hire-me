@@ -469,3 +469,46 @@ def test_clearing_optional_fact_stops_reuse_and_survives_reload(store):
             assert store.facts(False)['preferred_name']['source'] == 'revoked'
             browser.close()
     finally: process.terminate(); process.join(5)
+
+
+def test_opportunity_dialog_and_approved_wording_edits(store, job):
+    from playwright.sync_api import sync_playwright, expect
+    store.put_template('project', 'I built a Python service and tested every deployment.')
+    store.block(job['id'], 'captcha_blocked')
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 390, 'height': 844})
+            errors = []; page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(base + '/#token=fixture-capability')
+            details = page.locator('#jobs .opportunity-details').first; details.click()
+            expect(page.get_by_role('dialog')).to_be_visible()
+            expect(page.locator('#job-dialog-title')).to_have_text(job['title'])
+            expect(page.locator('#job-dialog-description')).to_contain_text('Build Python and TypeScript software')
+            expect(page.locator('#job-dialog-guidance')).to_contain_text('A CAPTCHA needs you')
+            expect(page.locator('#job-dialog-link')).to_have_attribute('href', job['url'])
+            expect(page.locator('#close-job-dialog')).to_be_focused()
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            page.keyboard.press('Escape')
+            expect(page.get_by_role('dialog')).to_be_hidden(); expect(details).to_be_focused()
+            page.locator('[data-view=profile]').click()
+            page.locator('#templates summary').click()
+            text = page.locator('#templates textarea')
+            text.fill('I built a TypeScript service and measured every deployment.')
+            text.blur(); page.evaluate('refresh()')
+            expect(text).to_have_value('I built a TypeScript service and measured every deployment.')
+            page.get_by_role('button', name='Save revised wording', exact=True).click()
+            expect(page.locator('#notice')).to_contain_text('Revised wording saved')
+            assert store.templates()[0]['revision'] == 2
+            page.locator('#templates summary').click()
+            page.get_by_role('button', name='Stop using this wording', exact=True).click()
+            expect(page.locator('#notice')).to_contain_text('Approved wording withdrawn')
+            assert not store.templates()
+            assert not errors
+            browser.close()
+    finally: process.terminate(); process.join(5)

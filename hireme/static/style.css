@@ -1462,3 +1462,146 @@ pre {
   font-weight: 400;
   font-size: 11px;
 }
+.opportunity-details {
+  display: block;
+  padding: 0;
+  min-height: 44px;
+  background: transparent;
+  color: var(--action);
+  font-size: 11px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+.opportunity-details:hover {
+  background: transparent;
+  color: #204eb7;
+  text-decoration: underline;
+}
+.job-dialog {
+  padding: 0;
+  width: min(660px, calc(100vw - 40px));
+  max-height: min(90dvh, 1000px);
+  border: 1px solid var(--rule);
+  border-radius: 18px;
+  color: var(--ink);
+  background: white;
+  box-shadow: 0 24px 80px #18283930;
+}
+.job-dialog::backdrop {
+  background: #18283970;
+}
+.dialog-head {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 18px;
+  padding: 26px 28px;
+  border-bottom: 1px solid var(--rule);
+}
+.dialog-head h2 {
+  font-size: 24px;
+  margin: 10px 0 5px;
+}
+.dialog-head p {
+  margin-bottom: 0;
+}
+.icon-button {
+  width: 44px;
+  min-width: 44px;
+  padding: 0;
+  font-size: 24px;
+  font-weight: 400;
+}
+.dialog-body {
+  padding: 24px 28px;
+}
+.dialog-body .callout {
+  display: block;
+  margin: 20px 0;
+  padding: 18px;
+}
+.dialog-body .callout h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+.dialog-body .callout p {
+  margin: 0;
+  font-size: 13px;
+}
+.dialog-body > h3 {
+  font-size: 17px;
+  margin-top: 24px;
+}
+.opportunity-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+  margin: 22px 0 12px;
+}
+.opportunity-facts dt {
+  color: var(--muted);
+  font-size: 11px;
+}
+.opportunity-facts dd {
+  margin: 5px 0 0;
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+.posting-description {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.8;
+  font-size: 14px;
+}
+.dialog-footer {
+  border-top: 1px solid var(--rule);
+  padding: 20px 28px;
+}
+.button-link {
+  display: inline-block;
+  background: var(--action);
+  color: white;
+  padding: 11px 16px;
+  border-radius: 8px;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+}
+.button-link:hover {
+  background: #204eb7;
+}
+@media (max-width: 600px) {
+  .job-dialog {
+    width: calc(100vw - 24px);
+    max-height: 92dvh;
+  }
+  .dialog-head,
+  .dialog-body,
+  .dialog-footer {
+    padding: 20px;
+  }
+  .dialog-head h2 {
+    font-size: 20px;
+  }
+  .opportunity-facts {
+    grid-template-columns: 1fr;
+    gap: 12px;
+  }
+  .opportunity-details {
+    min-height: 44px;
+  }
+}
+
+.dialog-open {
+  overflow: hidden;
+}
+.saved-template {
+  padding: 12px 0;
+  border-top: 1px solid var(--rule);
+}
+.saved-template .material-review {
+  margin-top: 12px;
+}
+.approved-body {
+  white-space: pre-wrap;
+}

@@ -233,6 +233,30 @@ class Store:
         self.event("template_confirmed",tid,{"category":category})
         return tid
 
+    def _user_template(self, tid):
+        if not isinstance(tid, str) or not tid or len(tid) > 100:
+            raise ValueError("Choose an existing approved wording")
+        if tid.startswith('material:'):
+            raise ValueError("Edit or revoke this source in Writing & context")
+        row = self.db.execute('SELECT * FROM templates WHERE id=?', (tid,)).fetchone()
+        if not row:
+            raise ValueError("Approved wording not found")
+        return row
+
+    def edit_template(self, tid, category, body):
+        with self.transaction():
+            self._user_template(tid)
+            self.put_template(category, body, tid)
+            self.db.execute("DELETE FROM applications WHERE state='prepared'")
+        return tid
+
+    def revoke_template(self, tid):
+        with self.transaction():
+            row = self._user_template(tid)
+            self.db.execute('DELETE FROM templates WHERE id=?', (tid,))
+            self.db.execute("DELETE FROM applications WHERE state='prepared'")
+            self.event('template_revoked', tid, {'category': row['category']})
+
     def templates(self):
         return [dict(x) for x in self.db.execute("SELECT * FROM templates")]
 

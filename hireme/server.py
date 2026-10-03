@@ -146,6 +146,8 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                         from .reports import flush_reports
                         result=flush_reports(store)
                     elif path=='/api/template':result={'id':store.put_template(data['category'],data['body'])}
+                    elif path=='/api/template-edit':result={'id':store.edit_template(data['id'],data['category'],data['body'])}
+                    elif path=='/api/template-revoke':store.revoke_template(data['id']);result={'revoked':True}
                     elif path=='/api/pause':store.update_settings({'live_enabled':False});result={'paused':True}
                     elif path=='/api/resume-worker':store.update_settings({'live_enabled':True});result={'enabled':True}
                     elif path=='/api/settings':result=store.update_settings(data)

@@ -829,5 +829,66 @@ claude auth login</pre
         </footer>
       </main>
     </div>
+    <dialog
+      id="job-dialog"
+      class="job-dialog"
+      aria-labelledby="job-dialog-title"
+    >
+      <header class="dialog-head">
+        <div>
+          <p class="eyebrow">OPPORTUNITY DETAILS</p>
+          <h2 id="job-dialog-title"></h2>
+          <p id="job-dialog-company" class="help"></p>
+        </div>
+        <button
+          id="close-job-dialog"
+          class="secondary icon-button"
+          type="button"
+          aria-label="Close opportunity details"
+          autofocus
+        >
+          ×
+        </button>
+      </header>
+      <div class="dialog-body">
+        <div id="job-dialog-state"></div>
+        <div id="job-dialog-guidance" class="callout" hidden></div>
+        <dl class="opportunity-facts">
+          <div>
+            <dt>Location</dt>
+            <dd id="job-dialog-location"></dd>
+          </div>
+          <div>
+            <dt>Fit score</dt>
+            <dd id="job-dialog-fit"></dd>
+          </div>
+          <div>
+            <dt>Discovered</dt>
+            <dd id="job-dialog-discovered"></dd>
+          </div>
+        </dl>
+        <p class="help">
+          Fit is a keyword-based score from your confirmed skills and search
+          preferences. It is not a prediction of employer interest.
+        </p>
+        <h3>About the opportunity</h3>
+        <p id="job-dialog-description" class="posting-description"></p>
+        <details id="job-dialog-diagnostics" hidden>
+          <summary>Recorded details</summary>
+          <p id="job-dialog-reason" class="help"></p>
+        </details>
+      </div>
+      <footer class="dialog-footer">
+        <a
+          id="job-dialog-link"
+          class="button-link"
+          target="_blank"
+          rel="noopener noreferrer"
+          >Open official posting <span aria-hidden="true">↗</span></a
+        ><span id="job-dialog-demo" class="help" hidden
+          >Invented opportunity for this sample workspace.</span
+        >
+      </footer>
+    </dialog>
   </body>
 </html>

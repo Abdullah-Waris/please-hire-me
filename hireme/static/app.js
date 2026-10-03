@@ -189,6 +189,7 @@ function date(v) {
     ? new Date(v).toLocaleString(undefined, {
         dateStyle: "medium",
         timeStyle: "short",
+        timeZone: state?.settings.timezone,
       })
     : "—";
 }
@@ -331,11 +332,19 @@ function table(jobs, parent, filtered = false) {
     c.append(
       el(
         "span",
-        job.score > 0 ? `${job.score}%` : "Not evaluated",
+        job.score > 0 ? `${job.score}/100` : "Not evaluated",
         job.score > 0 ? "fit-score" : "subtle",
       ),
     );
     const d = el("td");
+    const viewDetails = el("button", "View details", "opportunity-details");
+    viewDetails.type = "button";
+    viewDetails.setAttribute(
+      "aria-label",
+      `View details for ${job.company} · ${job.title}`,
+    );
+    viewDetails.onclick = () => openOpportunity(job);
+    d.append(viewDetails);
     const app = state.applications.find((x) => x.job_id === job.id);
     if (app) {
       const detail = el("details");
@@ -797,16 +806,112 @@ $("#provider-form [name=provider]").addEventListener(
   "change",
   updateProviderFields,
 );
+const templateCategories = {
+  motivation: "Why this role",
+  project: "A project I built",
+  experience: "My background",
+};
 function renderTemplates() {
-  const p = $("#templates");
-  p.replaceChildren();
-  for (const t of state.templates) {
-    const d = el("details");
-    d.append(
-      el("summary", t.category + " · " + t.body.slice(0, 70)),
-      el("p", t.body),
+  const parent = $("#templates");
+  if (
+    [...parent.querySelectorAll("form")].some(
+      (form) => dirtyForms.has(form) || form.contains(document.activeElement),
+    )
+  )
+    return;
+  parent.replaceChildren();
+  for (const template of state.templates) {
+    const details = el("details", undefined, "saved-template");
+    details.append(
+      el(
+        "summary",
+        `${templateCategories[template.category] || template.category} · ${template.body.slice(0, 70)}`,
+      ),
     );
-    p.append(d);
+    if (template.id.startsWith("material:")) {
+      const source = el(
+        "button",
+        "Review source in Writing & context",
+        "secondary",
+      );
+      source.type = "button";
+      source.onclick = () => show("materials");
+      details.append(
+        el("p", template.body, "approved-body"),
+        el(
+          "p",
+          "This wording comes from a reviewed personal document. Edit its source or revoke its approved use in Writing & context.",
+          "help",
+        ),
+        source,
+      );
+    } else {
+      const form = el("form", undefined, "material-review"),
+        categoryLabel = el("label", "Use for"),
+        category = el("select");
+      for (const [value, label] of Object.entries(templateCategories))
+        category.append(new Option(label, value));
+      category.value = template.category;
+      categoryLabel.append(category);
+      const bodyLabel = el("label", "Your confirmed wording"),
+        body = el("textarea");
+      body.rows = 5;
+      body.required = true;
+      body.minLength = 20;
+      body.maxLength = 12000;
+      body.value = template.body;
+      bodyLabel.append(body);
+      const buttons = el("div", undefined, "actions"),
+        saveButton = el("button", "Save revised wording"),
+        revoke = el("button", "Stop using this wording", "secondary");
+      revoke.type = "button";
+      buttons.append(saveButton, revoke);
+      form.append(
+        categoryLabel,
+        bodyLabel,
+        el(
+          "p",
+          "Saving approves this revision. Older answers based on this text must pass a fresh source check.",
+          "help",
+        ),
+        buttons,
+      );
+      form.onsubmit = async (event) => {
+        event.preventDefault();
+        try {
+          await api("/api/template-edit", {
+            id: template.id,
+            category: category.value,
+            body: body.value,
+          });
+          saved(form);
+          document.activeElement.blur();
+          await refresh();
+          note(
+            "Revised wording saved. Future answers must use the updated source.",
+          );
+        } catch (error) {
+          note(error.message, true);
+        }
+      };
+      revoke.onclick = async () => {
+        revoke.disabled = true;
+        try {
+          await api("/api/template-revoke", { id: template.id });
+          saved(form);
+          document.activeElement.blur();
+          await refresh();
+          note(
+            "Approved wording withdrawn. It will no longer support new answers. Application history stays recorded.",
+          );
+        } catch (error) {
+          note(error.message, true);
+          revoke.disabled = false;
+        }
+      };
+      details.append(form);
+    }
+    parent.append(details);
   }
 }
 function renderSettings() {
@@ -1733,3 +1838,67 @@ document.addEventListener("input", (event) => {
     if (indicator) indicator.textContent = "Unsaved changes";
   }
 });
+
+function openOpportunity(job) {
+  const payload = jobPayload(job),
+    dialog = $("#job-dialog");
+  $("#job-dialog-title").textContent = job.title;
+  $("#job-dialog-company").textContent = job.company;
+  $("#job-dialog-location").textContent =
+    payload.location || "Not stated in the posting";
+  $("#job-dialog-fit").textContent =
+    job.score > 0 ? `${job.score} / 100` : "Not evaluated yet";
+  $("#job-dialog-discovered").textContent = date(job.first_seen);
+  const status = $("#job-dialog-state");
+  status.replaceChildren(
+    el(
+      "span",
+      job.status_label || statusLabels[job.status] || job.status,
+      "state " + (job.display_status || job.status),
+    ),
+  );
+  const guidance = $("#job-dialog-guidance");
+  guidance.replaceChildren();
+  guidance.hidden = !job.reason;
+  if (job.reason)
+    guidance.append(
+      el("h3", job.reason_label || job.reason),
+      el(
+        "p",
+        job.next_step || "Review the official posting and recorded details.",
+      ),
+    );
+  const description =
+    payload.description ||
+    "No posting text has been saved yet. Open the official posting for the full role description.";
+  $("#job-dialog-description").textContent =
+    description.slice(0, 20000) +
+    (description.length > 20000
+      ? "\n\nThis excerpt is shortened. Open the official posting for the complete description."
+      : "");
+  $("#job-dialog-reason").textContent = job.reason || "";
+  $("#job-dialog-diagnostics").hidden = !job.reason;
+  const official = $("#job-dialog-link");
+  official.hidden = state.demo || !/^https:\/\//.test(job.url);
+  if (!official.hidden) official.href = job.url;
+  else official.removeAttribute("href");
+  $("#job-dialog-demo").hidden = !state.demo;
+  document.body.classList.add("dialog-open");
+  dialog.showModal();
+}
+$("#close-job-dialog").onclick = () => $("#job-dialog").close();
+$("#job-dialog").addEventListener("click", (event) => {
+  if (event.target !== event.currentTarget) return;
+  const bounds = event.currentTarget.getBoundingClientRect();
+  if (
+    event.clientX < bounds.left ||
+    event.clientX > bounds.right ||
+    event.clientY < bounds.top ||
+    event.clientY > bounds.bottom
+  )
+    event.currentTarget.close();
+});
+
+$("#job-dialog").addEventListener("close", () =>
+  document.body.classList.remove("dialog-open"),
+);
