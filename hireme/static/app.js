@@ -14,6 +14,7 @@ let refreshing = null;
 let backupBusy = false;
 let renderedAccountSignature = null;
 let aliasJsonMode = false;
+let renderedBlockedSignature = null;
 let outcomeState = null,
   outcomeOffset = 0,
   outcomeBusy = false,
@@ -1149,14 +1150,39 @@ function renderQuestions() {
   )
     return;
   renderQuestionList();
-  table(
-    state.jobs.filter(
-      (j) => j.status === "blocked" && (j.requires_attention ?? true),
-    ),
-    $("#blocked-jobs"),
-  );
+  const blocked = state.jobs
+      .filter((j) => j.status === "blocked" && (j.requires_attention ?? true))
+      .slice(0, 12),
+    heldTotal = state.summary?.held_count ?? blocked.length,
+    ids = new Set(blocked.map((job) => job.id)),
+    signature = JSON.stringify([
+      blocked,
+      state.applications.filter((application) => ids.has(application.job_id)),
+      heldTotal,
+      state.demo,
+    ]);
+  $("#blocked-scope").textContent = heldTotal
+    ? `Showing ${blocked.length} of ${heldTotal} held opportunities. Open the complete list to search and browse 50 per page.`
+    : "No held opportunities in this section. Eligibility mismatches and company limits remain in the ledger.";
+  $("#view-all-holds").disabled = !heldTotal;
+  if (signature !== renderedBlockedSignature) {
+    if (heldTotal && !blocked.length)
+      empty(
+        $("#blocked-jobs"),
+        "Open the complete held-opportunity list below to review these records.",
+      );
+    else table(blocked, $("#blocked-jobs"));
+    renderedBlockedSignature = signature;
+  }
   renderOutcomes();
 }
+$("#view-all-holds").onclick = async () => {
+  $("#job-search").value = "";
+  $("#status-filter").value = "blocked";
+  show("today");
+  await loadLedger(true);
+  scrollLedgerIntoView();
+};
 const groups = {
   Contact: [
     "full_name",

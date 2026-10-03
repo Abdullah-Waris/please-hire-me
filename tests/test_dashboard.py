@@ -238,6 +238,44 @@ def test_outcome_evidence_loads_only_on_request_retries_and_preserves_reading_fo
     finally: process.terminate(); process.join(5)
 
 
+def test_compact_holds_preview_opens_complete_ledger_and_keeps_controls_stable(store, job):
+    from playwright.sync_api import sync_playwright, expect
+    from hireme.util import digest
+    store.db.execute("UPDATE jobs SET status='blocked',reason='captcha' WHERE id=?", (job['id'],))
+    for index in range(500):
+        extra = {**job, 'id': digest(f'held-job-{index}'), 'url': job['url'] + f'-held-{index}', 'company': f'Other held employer {index}'}
+        store.upsert_job(extra); store.db.execute("UPDATE jobs SET score=100,status='blocked',reason='captcha' WHERE id=?", (extra['id'],))
+    quiet = {**job, 'id': digest('quiet-held-job'), 'url': job['url'] + '-quiet', 'company': 'Quiet Company'}
+    store.upsert_job(quiet); store.db.execute("UPDATE jobs SET status='blocked',reason='company_blocked' WHERE id=?", (quiet['id'],))
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 320, 'height': 844}); errors = []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(base + '/#token=fixture-capability'); page.locator('[data-view=questions]').click()
+            expect(page.locator('#blocked-scope')).to_contain_text('Showing 12 of 501')
+            expect(page.locator('#blocked-jobs .opportunity-details')).to_have_count(12)
+            button = page.locator('#blocked-jobs .opportunity-details').first
+            button.evaluate("element => element.dataset.fixtureStable = 'yes'")
+            button.focus(); page.evaluate('refresh()')
+            expect(button).to_be_focused(); expect(button).to_have_attribute('data-fixture-stable', 'yes')
+            page.locator('#view-all-holds').click()
+            expect(page.locator('#heading')).to_have_text('Today’s applications')
+            expect(page.locator('#status-filter')).to_have_value('blocked')
+            expect(page.locator('#ledger-page-label')).to_contain_text('1–50 of 501')
+            page.locator('#job-search').fill('Acme')
+            expect(page.locator('#jobs .opportunity-details')).to_have_count(1)
+            expect(page.locator('#jobs')).to_contain_text('Acme')
+            assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            browser.close()
+    finally: process.terminate(); process.join(5)
+
+
 def test_dashboard_capability_csrf_host_and_xss(tmp_path):
     sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
     process=multiprocessing.Process(target=launch,args=(str(tmp_path/'private'),str(Path(__file__).parent.parent),port))
