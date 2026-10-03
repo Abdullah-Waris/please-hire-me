@@ -251,8 +251,13 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
             if demo:return self.send(403,{'error':'This is a read-only sample workspace. Start the regular dashboard to save your own information.'})
             try:
                 size=int(self.headers.get('Content-Length','0'))
+                path=urlsplit(self.path).path
+                if path=='/api/backup-check':
+                    from .backup_inspection import inspect_upload,MAX_UPLOAD
+                    if not 0<size<=MAX_UPLOAD:return self.send(413,{'error':'Choose a history backup ZIP up to 1 GiB'})
+                    return self.send(200,inspect_upload(self.rfile,size,root))
                 if not 0<size<=MAX_BODY:return self.send(413,{'error':'Request too large'})
-                raw=self.rfile.read(size);path=urlsplit(self.path).path
+                raw=self.rfile.read(size)
                 store=Store(root)
                 try:
                     if path in ('/api/resume','/api/transcript'):

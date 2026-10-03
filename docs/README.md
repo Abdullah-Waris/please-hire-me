@@ -25,7 +25,7 @@ The `hireme/` package stays flat so existing imports and command wrappers remain
 | Employer accounts, metadata review and encrypted transfer | `accounts.py`, `account_ledger.py`, `account_transfer.py`, `account_transfer_web.py` |
 | Application execution and company boundaries | `worker.py`, `browser.py`, `policy.py`, `company_controls.py` |
 | Discovery | `discovery.py`, `opportunity_search.py`, `portals.py`, `net.py` |
-| Persistence and migration | `store.py`, `config.py`, `backup.py`, `migration.py`, `util.py` |
+| Persistence and migration | `store.py`, `config.py`, `backup.py`, `backup_inspection.py`, `migration.py`, `util.py` |
 | Email | `gmail.py`, `reports.py` |
 | Local/Pi scheduling | `scheduler.py`, `pi.py` |
 

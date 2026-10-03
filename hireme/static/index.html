@@ -1366,6 +1366,34 @@
               Download history backup <span aria-hidden="true">↓</span>
             </button>
             <p id="backup-state" class="help">Checking worker status…</p>
+            <details class="section" id="backup-check-panel">
+              <summary>Check a backup before moving it</summary>
+              <p class="help">
+                Check the archive, ledger and document references with a
+                temporary restore. Your current workspace stays unchanged. The
+                temporary copy is removed after the check.
+              </p>
+              <form id="backup-check-form" method="post" class="form-grid">
+                <label
+                  >History backup ZIP<input
+                    id="backup-check-file"
+                    type="file"
+                    disabled
+                    accept=".zip,application/zip"
+                    required
+                    aria-describedby="backup-check-help"
+                /></label>
+                <p id="backup-check-help" class="help">
+                  Choose a private history backup up to 1 GiB. Checking a large
+                  archive may take a little time.
+                </p>
+                <button type="submit" class="secondary" disabled>
+                  Check backup
+                </button>
+              </form>
+              <p id="backup-check-status" class="help" role="status"></p>
+              <div id="backup-check-result" hidden></div>
+            </details>
           </div>
         </section>
         <section id="providers" class="view" hidden>

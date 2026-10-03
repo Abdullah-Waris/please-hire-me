@@ -1760,6 +1760,10 @@ pre {
   gap: 20px;
   margin-top: 18px;
 }
+#backup-check-result,
+#backup-check-status {
+  overflow-wrap: anywhere;
+}
 .account-transfer-grid form {
   min-width: 0;
 }

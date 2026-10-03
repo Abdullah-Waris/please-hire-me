@@ -1089,7 +1089,7 @@ def test_demo_is_read_only_and_export_requires_auth(tmp_path):
         except urllib.error.HTTPError as error: assert error.code == 403
         try: urllib.request.urlopen(base + '/api/diagnostics'); assert False
         except urllib.error.HTTPError as error: assert error.code == 403
-        for endpoint in ('pause', 'resume-worker', 'run', 'discover', 'facts', 'settings', 'complete-setup', 'backup', 'recover', 'answer-revoke', 'schedule-apply', 'company-skip', 'company-allow', 'account-vault-export', 'account-vault-import'):
+        for endpoint in ('pause', 'resume-worker', 'run', 'discover', 'facts', 'settings', 'complete-setup', 'backup', 'recover', 'answer-revoke', 'schedule-apply', 'company-skip', 'company-allow', 'account-vault-export', 'account-vault-import', 'backup-check'):
             request = urllib.request.Request(base + '/api/' + endpoint, data=b'{}', headers={'X-Hireme-Token': 'fixture-capability'})
             try: urllib.request.urlopen(request); assert False
             except urllib.error.HTTPError as error:
@@ -1967,4 +1967,47 @@ def test_dashboard_encrypted_password_transfer_auth_pause_retry_and_secret_clean
             assert not list(store.root.glob('.account-transfer-*'))
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             browser.close()
+    finally: process.terminate(); process.join(5)
+
+
+def test_backup_check_browser_retry_isolation_and_authentication(store, tmp_path):
+    from hireme.backup import create_backup
+    from playwright.sync_api import sync_playwright, expect
+    archive = tmp_path / 'synthetic-history.zip'
+    create_backup(store, archive)
+    before = store.snapshot()
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 320, 'height': 844})
+            errors = []; page.on('pageerror', lambda error: errors.append(str(error)))
+            assert page.request.post(base+'/api/backup-check', data=archive.read_bytes()).status == 403
+            page.goto(base+'/#token=fixture-capability'); page.locator('[data-view=settings]').click()
+            page.locator('#backup-check-panel summary').click()
+            expect(page.locator('#backup-check-file')).to_be_enabled()
+            page.locator('#backup-check-file').set_input_files(archive)
+            page.route('**/api/backup-check', lambda route: route.abort())
+            page.locator('#backup-check-form button').click()
+            expect(page.locator('#backup-check-status')).to_contain_text('Cannot reach')
+            expect(page.locator('#backup-check-file')).to_be_enabled()
+            page.unroute('**/api/backup-check')
+            page.locator('#backup-check-form button').click()
+            expect(page.locator('#backup-check-result')).to_contain_text('Backup checks passed')
+            expect(page.locator('#backup-check-result')).to_contain_text('test@candidate.invalid')
+            page.evaluate('window.backupReportNode = document.querySelector("#backup-check-result").firstElementChild')
+            page.evaluate('refresh()')
+            assert page.evaluate('backupReportNode === document.querySelector("#backup-check-result").firstElementChild')
+            page.locator('#backup-check-file').set_input_files({'name':'damaged.zip','mimeType':'application/zip','buffer':b'not a zip'})
+            expect(page.locator('#backup-check-result')).to_be_hidden()
+            page.locator('#backup-check-form button').click()
+            expect(page.locator('#backup-check-status')).to_contain_text('Cannot restore')
+            assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            browser.close()
+        assert store.snapshot() == before and store.settings()['live_enabled']
+        assert not list(store.root.glob('.backup-check-*'))
     finally: process.terminate(); process.join(5)

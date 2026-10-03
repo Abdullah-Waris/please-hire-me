@@ -2324,6 +2324,8 @@ function render() {
   updateScheduleControls();
   $("#download-backup").disabled =
     state.demo || state.worker_running || backupBusy;
+  for (const control of $("#backup-check-form").elements)
+    control.disabled = state.demo || backupCheckBusy;
   $("#backup-state").textContent = backupBusy
     ? "Preparing your private archive…"
     : state.demo
@@ -3824,6 +3826,86 @@ $("#job-dialog").addEventListener("click", (event) => {
 $("#job-dialog").addEventListener("close", () =>
   document.body.classList.remove("dialog-open"),
 );
+
+let backupCheckBusy = false;
+$("#backup-check-file").onchange = () => {
+  $("#backup-check-result").hidden = true;
+  $("#backup-check-status").textContent = "";
+};
+$("#backup-check-form").onsubmit = async (event) => {
+  event.preventDefault();
+  if (!state || backupCheckBusy || state.demo) return;
+  const file = $("#backup-check-file").files[0];
+  const status = $("#backup-check-status");
+  const feedback = (text, error = false) => {
+    status.textContent = text;
+    status.setAttribute("role", error ? "alert" : "status");
+  };
+  if (!file || !file.size || file.size > 1024 ** 3) {
+    feedback("Choose a history backup ZIP up to 1 GiB.", true);
+    return;
+  }
+  backupCheckBusy = true;
+  render();
+  $("#backup-check-result").hidden = true;
+  feedback("Checking your backup with a temporary restore…");
+  try {
+    const result = await api("/api/backup-check", file, true, {
+      "Content-Type": "application/zip",
+    });
+    const report = $("#backup-check-result");
+    report.replaceChildren();
+    report.append(el("h3", "Backup checks passed"));
+    const owner = [result.owner.full_name, result.owner.email].filter(Boolean);
+    report.append(
+      el(
+        "p",
+        owner.length
+          ? `Applicant: ${owner.join(" · ")}`
+          : "Applicant details need confirmation.",
+      ),
+    );
+    const labels = {
+      opportunities: "Saved opportunities",
+      applications: "Application records",
+      confirmations: "Recorded confirmations",
+      outcomes_to_review: "Outcomes to review",
+      unanswered_questions: "Unanswered questions",
+      employer_accounts: "Employer account records",
+      accounts_to_review: "Accounts to review",
+      writing_sources: "Writing sources",
+      approved_sources: "Approved writing sources",
+      pdf_files: "PDF files",
+      source_files: "Original source files",
+      evidence_images: "Evidence images",
+    };
+    const list = el("ul");
+    for (const [key, label] of Object.entries(labels))
+      list.append(el("li", `${label}: ${result.counts[key].toLocaleString()}`));
+    report.append(list);
+    report.append(
+      el(
+        "p",
+        "Restore into a new private directory with applications paused. Reconnect your model, email and browser sessions. Employer passwords need the separate encrypted transfer.",
+        "help",
+      ),
+    );
+    report.append(
+      el(
+        "p",
+        `Checked ${new Date(result.checked_at).toLocaleString()}. The temporary copy has been removed.`,
+        "help",
+      ),
+    );
+    report.hidden = false;
+    feedback("Backup check complete. Your current workspace is unchanged.");
+  } catch (error) {
+    feedback(`${error.message} You can choose a backup and check again.`, true);
+  } finally {
+    backupCheckBusy = false;
+    render();
+  }
+};
 
 $("#download-backup").onclick = async () => {
   if (backupBusy) return;
