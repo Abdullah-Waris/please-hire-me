@@ -39,3 +39,46 @@ def test_paused_cycle_still_records_batch_summary(store):
     with pytest.raises(Blocked,match='paused'):cycle(store,Path('.'),discover=False)
     row=store.db.execute('SELECT * FROM report_outbox').fetchone()
     assert 'paused' in row['body'] and 'Confirmed submissions: 0' in row['body']
+
+
+def test_batch_email_links_include_submitted_browser_blocked_and_screening_blocked(store,job,monkeypatch):
+    from hireme.util import digest
+    jobs = []
+    for outcome in ('confirmed', 'blocked', 'screened'):
+        url = job['url'] + '-' + outcome
+        item = {**job, 'id': digest(url), 'url': url, 'company': outcome}
+        store.upsert_job(item)
+        jobs.append(item)
+
+    def screen(item,*args):
+        if item['company'] == 'screened':
+            raise Blocked('location_mismatch', 'Review the location before applying')
+        return 1, []
+
+    class Browser:
+        def __init__(self,s):pass
+        def __enter__(self):return self
+        def __exit__(self,*args):pass
+        def apply(self,item,live=True):
+            if item['company'] == 'blocked':
+                raise Blocked('captcha', 'Complete the employer CAPTCHA')
+            return 'confirmed'
+
+    monkeypatch.setattr('hireme.worker.eligible',screen)
+    cycle(store,Path('.'),discover=False,browser_factory=Browser,job_ids=[j['id'] for j in jobs])
+    body = store.db.execute('SELECT body FROM report_outbox').fetchone()[0]
+    for item in jobs:
+        assert body.count(item['url']) == 1
+    assert 'Applied successfully' in body
+    assert 'Blocked — review or apply manually' in body
+    assert 'location_mismatch' in body and 'Complete the employer CAPTCHA' in body
+    assert 'choose Applied manually' in body
+    assert 'check with the employer before applying again' in body
+    assert store.db.execute('SELECT count(*) FROM applications').fetchone()[0] == 0
+
+
+def test_report_does_not_include_other_runs_job_links(store,job):
+    store.event('job_screening_blocked',job['id'],{'run_id':'another-run','outcome':'blocked','reason':'location_mismatch'})
+    finished(store)
+    body = store.db.execute('SELECT body FROM report_outbox').fetchone()[0]
+    assert job['url'] not in body
