@@ -24,6 +24,7 @@ def summary(store, at=None):
     counts = dict(store.db.execute('SELECT status,COUNT(*) FROM jobs GROUP BY status'))
     submitted = store.db.execute("""SELECT COUNT(*) FROM applications
         WHERE state='confirmed' AND attempted>=? AND attempted<?""", bounds).fetchone()[0]
+    model_requests = store.db.execute('SELECT COUNT(*) FROM model_requests WHERE timestamp>=? AND timestamp<?', bounds).fetchone()[0]
     condition, parameters = attention_sql('j')
     attention = store.db.execute(f"""SELECT COUNT(*) FROM (
         SELECT job_id FROM questions WHERE resolved=0
@@ -34,7 +35,8 @@ def summary(store, at=None):
     questions = store.db.execute('SELECT COUNT(*) FROM questions WHERE resolved=0').fetchone()[0]
     held = store.db.execute(f"SELECT COUNT(*) FROM jobs j WHERE j.status='blocked' AND {condition}", parameters).fetchone()[0]
     return {'job_count': sum(counts.values()), 'status_counts': counts, 'submitted_today': submitted,
-            'attention_count': attention + accounts, 'question_count': questions, 'held_count': held, 'local_date': local.date().isoformat()}
+            'attention_count': attention + accounts, 'question_count': questions, 'held_count': held,
+            'model_requests_today': model_requests, 'local_date': local.date().isoformat()}
 
 
 def spreadsheet_text(value):

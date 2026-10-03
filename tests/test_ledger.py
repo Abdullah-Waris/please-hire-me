@@ -31,7 +31,10 @@ def test_summary_counts_local_day_across_clock_changes(store, day, timestamps, e
     for index, timestamp in enumerate(timestamps):
         job = posting(f'https://jobs.lever.co/clock/req-{index}', f'Clock {index}', 'Intern', 'US', 'fixture')
         store.upsert_job(job); application(store, job, timestamp)
+        store.db.execute('INSERT INTO model_requests(timestamp,run_id,provider) VALUES(?,?,?)',
+                         (timestamp, 'fixture-run', 'claude-cli' if index % 2 else 'openai-api'))
     assert summary(store, datetime.fromisoformat(day))['submitted_today'] == expected
+    assert summary(store, datetime.fromisoformat(day))['model_requests_today'] == expected
 
 
 def test_summary_counts_complete_ledger_and_deduplicates_attention(store):

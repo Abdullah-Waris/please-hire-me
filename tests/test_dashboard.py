@@ -276,6 +276,42 @@ def test_compact_holds_preview_opens_complete_ledger_and_keeps_controls_stable(s
     finally: process.terminate(); process.join(5)
 
 
+def test_model_request_budget_counts_all_providers_without_replacing_connection_drafts(store):
+    from datetime import datetime, timedelta, timezone
+    from playwright.sync_api import sync_playwright, expect
+    stamp = datetime.now(timezone.utc).isoformat(timespec='seconds')
+    store.update_settings({'max_model_requests_per_day': 2, 'max_model_requests_per_cycle': 2})
+    for provider in ('claude-cli', 'openai-api'):
+        store.db.execute('INSERT INTO model_requests(timestamp,run_id,provider) VALUES(?,?,?)', (stamp, 'fixture-run', provider))
+    store.db.execute('INSERT INTO model_requests(timestamp,run_id,provider) VALUES(?,?,?)',
+                     ((datetime.now(timezone.utc) - timedelta(days=2)).isoformat(timespec='seconds'), 'old-run', 'codex-cli'))
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 320, 'height': 844}); errors = []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(base + '/#token=fixture-capability'); page.locator('[data-view=providers]').click()
+            expect(page.locator('#model-request-usage')).to_contain_text('2 of 2 requests used today · 0 remaining · Daily cap reached')
+            expect(page.locator('#model-request-reset')).to_contain_text(store.settings()['timezone'])
+            page.locator('#provider-form [name=provider]').select_option('openai-api')
+            page.locator('#provider-form [name=provider_model]').fill('Synthetic unsaved model')
+            page.locator('#provider-form [name=key]').fill('synthetic-unsaved-key')
+            page.locator('#provider-form [name=key]').blur()
+            store.db.execute('INSERT INTO model_requests(timestamp,run_id,provider) VALUES(?,?,?)', (stamp, 'fixture-run', 'codex-cli'))
+            page.evaluate('refresh()')
+            expect(page.locator('#model-request-usage')).to_contain_text('3 of 2 requests used today · 0 remaining')
+            expect(page.locator('#provider-form [name=provider_model]')).to_have_value('Synthetic unsaved model')
+            expect(page.locator('#provider-form [name=key]')).to_have_value('synthetic-unsaved-key')
+            assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            browser.close()
+    finally: process.terminate(); process.join(5)
+
+
 def test_dashboard_capability_csrf_host_and_xss(tmp_path):
     sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
     process=multiprocessing.Process(target=launch,args=(str(tmp_path/'private'),str(Path(__file__).parent.parent),port))

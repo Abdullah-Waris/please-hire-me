@@ -2571,6 +2571,13 @@ function renderSetup() {
     }
   updateProviderFields();
   $("#provider-state").textContent = checks.provider.message;
+  const used = state.summary?.model_requests_today ?? 0,
+    cap = state.settings.max_model_requests_per_day,
+    usage = `${used} of ${cap} requests used today · ${Math.max(0, cap - used)} remaining${used >= cap ? " · Daily cap reached" : ""}`;
+  if ($("#model-request-usage").textContent !== usage)
+    $("#model-request-usage").textContent = usage;
+  $("#model-request-reset").textContent =
+    `Resets at midnight in ${state.settings.timezone}. Per-batch cap: ${state.settings.max_model_requests_per_cycle} requests.`;
   $("#provider-instructions").textContent =
     state.settings.provider === "claude-cli"
       ? "claude auth login"
