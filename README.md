@@ -38,6 +38,8 @@ The setup page checks the machine and guides you through:
 1. **Documents:** a resume PDF with selectable text is required. A transcript PDF is optional. Upload cover-letter examples or templates in Writing & context.
 
    In **Your facts**, **Stop using transcript** withdraws it from future uploads and removes unattempted drafts containing it. Past application records and private evidence files stay available. This waits until no batch is running and leaves your pause setting unchanged; you can import a transcript again later.
+
+   Setup checks that the selected resume is still a readable PDF in private storage. If it disappears or becomes unavailable, the dashboard asks for a fresh import and disables batch starts. Reimported resume values still require confirmation. An unavailable optional transcript is explained separately and can be replaced or withdrawn. Availability checks read only the PDF header; full document hashes are checked before upload.
 2. **Key information:** review extracted values, confirm them, and supply information the resume does not establish. Work authorization, sponsorship, and other legal facts require your answers.
 3. **Additional context:** paste or upload your experience, interests, project notes, or research. Approve each source as personal factual work, background reference, or style only.
 4. **Writing samples:** upload essays, cover-letter examples, or other writing as DOCX, PDF, PPTX, TXT, or Markdown. Review an excerpt before approving its use. Optional sources may be skipped and added later.

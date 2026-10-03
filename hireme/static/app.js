@@ -1503,15 +1503,19 @@ function renderTemplates() {
   }
 }
 function renderDocumentStatus() {
-  $("#resume-state").textContent = state.documents.some(
-    (x) => x.kind === "resume",
-  )
-    ? "Resume imported and stored privately."
+  const resume = state.documents.find((document) => document.kind === "resume"),
+    transcript = state.documents.find(
+      (document) => document.kind === "transcript",
+    );
+  $("#resume-state").textContent = resume
+    ? resume.available === false
+      ? "Your saved resume file is unavailable. Import a resume PDF again before starting a batch."
+      : "Resume imported and stored privately."
     : "No resume imported.";
-  $("#transcript-state").textContent = state.documents.some(
-    (x) => x.kind === "transcript",
-  )
-    ? "Transcript imported and stored privately. Upload another PDF to replace it."
+  $("#transcript-state").textContent = transcript
+    ? transcript.available === false
+      ? "Your saved transcript file is unavailable. Import a transcript PDF again, or stop using it for future uploads."
+      : "Transcript imported and stored privately. Upload another PDF to replace it."
     : "No transcript imported. Jobs requiring one will appear in Needs you.";
   updateTranscriptWithdrawal();
 }
@@ -2816,7 +2820,7 @@ function renderSetup() {
   const list = $("#setup-steps");
   list.replaceChildren();
   const completed = [
-    state.documents.some((d) => d.kind === "resume"),
+    state.documents.some((d) => d.kind === "resume" && d.available !== false),
     state.missing_setup.filter((k) => k !== "resume").length === 0,
     state.materials.some((m) => m.confirmed && m.role === "personal"),
     state.materials.some((m) => m.confirmed && m.role === "style"),
@@ -2885,7 +2889,10 @@ function goSetup(index) {
 $("#begin-setup").onclick = () => goSetup(0);
 $("#setup-back").onclick = () => goSetup(Math.max(0, setupStep - 1));
 $("#setup-next").onclick = () => {
-  if (setupStep === 0 && !state.documents.some((d) => d.kind === "resume"))
+  if (
+    setupStep === 0 &&
+    !state.documents.some((d) => d.kind === "resume" && d.available !== false)
+  )
     return note("Import a resume before continuing.", true);
   if (setupStep === 1 && state.missing_setup.length)
     return note(

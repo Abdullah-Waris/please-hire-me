@@ -658,6 +658,46 @@ def test_saved_posting_dialog_checks_current_saved_preferences_without_writes(st
     finally:process.terminate();process.join(5)
 
 
+def test_dashboard_detects_missing_resume_and_reimport_preserves_fact_drafts(store,tmp_path):
+    from playwright.sync_api import sync_playwright,expect
+    from reportlab.pdfgen import canvas
+    old=store.db.execute("SELECT filename FROM documents WHERE kind='resume'").fetchone()[0]
+    replacement=tmp_path/'replacement.pdf';pdf=canvas.Canvas(str(replacement));pdf.drawString(72,720,'Test Person');pdf.drawString(72,700,'Synthetic replacement resume with selectable text.');pdf.save()
+    sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port));process.start()
+    base=f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try:urllib.request.urlopen(base).close();break
+            except OSError:time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch();page=browser.new_page(viewport={'width':320,'height':844});errors=[]
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.goto(base+'/#token=fixture-capability')
+            expect(page.locator('#run')).to_be_enabled()
+            page.locator('[data-view="profile"]').click()
+            page.locator('#facts-form [name="full_name"]').fill('Unsaved synthetic name')
+            (store.root/'documents'/old).unlink();page.evaluate('refresh()')
+            expect(page.locator('#resume-state')).to_contain_text('saved resume file is unavailable')
+            expect(page.locator('#run')).to_be_disabled()
+            expect(page.locator('#facts-form [name="full_name"]')).to_have_value('Unsaved synthetic name')
+            page.locator('#resume-upload').set_input_files(str(replacement))
+            expect(page.locator('#resume-state')).to_contain_text('Resume imported and stored privately')
+            expect(page.locator('#run')).to_be_disabled()
+            assert store.document_available('resume') and 'full_name' in store.missing_setup()
+            store.put_facts({'full_name':'Test Person','first_name':'Test','last_name':'Person'})
+            page.evaluate('refresh()')
+            expect(page.locator('#run')).to_be_enabled()
+            expect(page.locator('#facts-form [name="full_name"]')).to_have_value('Unsaved synthetic name')
+            assert store.document_available('resume') and not store.missing_setup()
+            assert store.facts()['full_name']['value']=='Test Person' and store.settings()['live_enabled']
+            assert not store.db.execute('SELECT * FROM applications').fetchone()
+            assert not store.db.execute('SELECT * FROM model_requests').fetchone()
+            assert not errors and page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            browser.close()
+    finally:process.terminate();process.join(5)
+
+
 def test_dashboard_capability_csrf_host_and_xss(tmp_path):
     sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
     process=multiprocessing.Process(target=launch,args=(str(tmp_path/'private'),str(Path(__file__).parent.parent),port))

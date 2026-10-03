@@ -4,6 +4,7 @@ import contextlib
 import fcntl
 import json
 import os
+import re
 import sqlite3
 import time
 import uuid
@@ -202,7 +203,7 @@ class Store:
 
     def missing_setup(self):
         missing = sorted(REQUIRED - self.facts().keys())
-        if not self.db.execute("SELECT 1 FROM documents WHERE kind='resume'").fetchone():
+        if not self.document_available('resume'):
             missing.append("resume")
         f = self.facts()
         if all(k in f for k in ("earliest_start", "latest_start")) and f["earliest_start"]["value"] > f["latest_start"]["value"]:
@@ -210,6 +211,16 @@ class Store:
         if self.db.execute("SELECT 1 FROM questions WHERE reason='legacy_history_review' AND resolved=0").fetchone():
             missing.append("legacy history review")
         return missing
+
+    def document_available(self,kind):
+        row=self.db.execute('SELECT hash,filename FROM documents WHERE kind=?',(kind,)).fetchone()
+        if not row or not isinstance(row['hash'],str) or not isinstance(row['filename'],str) or not re.fullmatch(r'[a-f0-9]{64}',row['hash']) or row['filename']!=row['hash']+'.pdf':return False
+        parent=self.root/'documents';path=parent/row['filename']
+        try:
+            if parent.is_symlink() or path.is_symlink() or not path.is_file():return False
+            # Availability only: full document hashing still happens before upload.
+            with path.open('rb') as document:return document.read(5)==b'%PDF-'
+        except OSError:return False
 
     @staticmethod
     def question_key(host, label, options):
@@ -487,7 +498,7 @@ class Store:
                 "runs":rows("SELECT * FROM runs ORDER BY started DESC LIMIT 30"),
                 "sources":rows("SELECT * FROM sources ORDER BY (error!='') DESC,checked DESC,id LIMIT 100"),
                 "employer_accounts":rows("SELECT * FROM employer_accounts ORDER BY (state IN ('uncertain','creating','signing_in')) DESC,updated DESC,id LIMIT 100"),
-                "documents":rows("SELECT * FROM documents"),"materials":[dict(r) for r in self.db.execute("SELECT * FROM materials ORDER BY created DESC,id DESC LIMIT 20 OFFSET ?",(material_offset,))],"material_count":self.db.execute("SELECT count(*) FROM materials").fetchone()[0],"material_offset":material_offset}
+                "documents":[{**row,'available':self.document_available(row['kind'])} for row in rows("SELECT * FROM documents")],"materials":[dict(r) for r in self.db.execute("SELECT * FROM materials ORDER BY created DESC,id DESC LIMIT 20 OFFSET ?",(material_offset,))],"material_count":self.db.execute("SELECT count(*) FROM materials").fetchone()[0],"material_offset":material_offset}
 
 
 @contextlib.contextmanager
