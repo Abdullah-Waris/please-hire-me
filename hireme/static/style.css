@@ -1653,3 +1653,29 @@ pre {
 .dialog-head > div {
   min-width: 0;
 }
+#company-alias-editor {
+  grid-column: 1 / -1;
+  min-width: 0;
+}
+#company-alias-editor > .actions {
+  flex-wrap: wrap;
+  margin: 12px 0;
+}
+.company-alias-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+  margin: 12px 0;
+}
+@media (max-width: 600px) {
+  .company-alias-row {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 12px;
+    border: 1px solid var(--rule);
+    border-radius: 10px;
+  }
+  .company-alias-row button {
+    justify-self: end;
+  }
+}

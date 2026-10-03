@@ -292,7 +292,7 @@ def test_fresh_user_guided_setup_saves_paused_and_provider_key_private(tmp_path)
             page.locator('#context-form textarea').fill('I built a Python tool that helps students organize their coursework.')
             page.locator('#context-form input[type=checkbox]').check();page.locator('#context-form button').click();expect(page.locator('#notice')).to_contain_text('Approved context saved')
             page.locator('#setup-next').click();page.locator('#setup-next').click();expect(page.locator('#guided-label')).to_contain_text('Step 5')
-            page.locator('#settings-form [name=seniority]').fill('internship');page.locator('#settings-form [name=max_attempts_per_cycle]').fill('2');page.locator('#settings-form button').click();expect(page.locator('#notice')).to_contain_text('Search preferences saved')
+            page.locator('#settings-form [name=seniority]').fill('internship');page.locator('#settings-form [name=max_attempts_per_cycle]').fill('2');page.locator('#settings-form button[type=submit]').click();expect(page.locator('#notice')).to_contain_text('Search preferences saved')
             page.locator('#setup-next').click();page.locator('#setup-next').click();expect(page.locator('#guided-label')).to_contain_text('Step 7')
             page.locator('#provider-form [name=provider]').select_option('openai-api');page.locator('#provider-form [name=provider_model]').fill('fixture-model');page.locator('#provider-form [name=key]').fill('synthetic-private-provider-key');page.locator('#provider-form button').click();expect(page.locator('#notice')).to_contain_text('Connection saved')
             assert page.locator('#provider-form [name=key]').input_value()==''
@@ -506,6 +506,7 @@ def test_unsaved_forms_survive_refresh_and_invalid_aliases_are_actionable(tmp_pa
             locations.fill('Unsaved location'); locations.blur()
             page.evaluate('refresh()')
             expect(locations).to_have_value('Unsaved location')
+            page.locator('#alias-json-toggle').click()
             page.locator('#settings-form [name=company_aliases]').fill('{broken JSON')
             page.get_by_role('button', name='Save preferences', exact=True).click()
             expect(page.locator('#notice')).to_contain_text('Company aliases must be a valid JSON object')
@@ -520,6 +521,58 @@ def test_unsaved_forms_survive_refresh_and_invalid_aliases_are_actionable(tmp_pa
             assert not errors
             browser.close()
     finally: process.terminate(); process.join(5)
+
+
+def test_company_name_editor_preserves_drafts_and_round_trips_json(tmp_path):
+    from playwright.sync_api import sync_playwright, expect
+    from hireme.store import Store
+    root = tmp_path / 'private'; store = Store(root)
+    store.update_settings({'company_aliases': {'Acme Inc': 'Acme'}})
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 320, 'height': 800}); errors = []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(base + '/#token=fixture-capability'); page.locator('[data-view=settings]').click()
+            expect(page.locator('[data-alias-other]')).to_have_value('Acme Inc')
+            expect(page.locator('[data-alias-main]')).to_have_value('Acme')
+            expect(page.locator('#alias-json-field')).to_be_hidden()
+            page.locator('#add-company-alias').click()
+            rows = page.locator('.company-alias-row')
+            expect(rows).to_have_count(2)
+            rows.nth(1).locator('[data-alias-other]').fill('Beta LLC')
+            rows.nth(1).locator('[data-alias-main]').fill('Beta'); rows.nth(1).locator('[data-alias-main]').blur()
+            page.evaluate('refresh()')
+            expect(rows.nth(1).locator('[data-alias-other]')).to_have_value('Beta LLC')
+            expect(page.locator('[data-draft-for=settings-form]')).to_contain_text('Unsaved changes')
+            page.get_by_role('button', name='Save preferences', exact=True).click()
+            expect(page.locator('#notice')).to_contain_text('Search preferences saved')
+            assert store.settings()['company_aliases'] == {'Acme Inc': 'Acme', 'Beta LLC': 'Beta'}
+            page.locator('#alias-json-toggle').click()
+            page.locator('#alias-json-field textarea').fill('{"Acme Inc":"Acme", "Beta LLC":"Beta", "Gamma Inc":"Gamma"}')
+            page.locator('#alias-json-toggle').click()
+            expect(rows).to_have_count(3)
+            expect(rows.nth(2).locator('[data-alias-main]')).to_have_value('Gamma')
+            rows.nth(2).locator('[data-alias-other]').fill('ACME, Inc.')
+            page.get_by_role('button', name='Save preferences', exact=True).click()
+            expect(page.locator('#notice')).to_contain_text('repeats another alternate name')
+            assert len(store.settings()['company_aliases']) == 2
+            rows.nth(2).get_by_role('button', name='Remove alternate name ACME, Inc.').click()
+            expect(page.locator('#add-company-alias')).to_be_focused()
+            rows.nth(1).get_by_role('button', name='Remove alternate name Beta LLC').click()
+            page.get_by_role('button', name='Save preferences', exact=True).click()
+            expect(page.locator('#notice')).to_have_text('Search preferences saved.')
+            assert store.settings()['company_aliases'] == {'Acme Inc': 'Acme'}
+            assert not store.settings()['live_enabled']
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth') and not errors
+            browser.close()
+    finally:
+        store.close(); process.terminate(); process.join(5)
 
 
 def test_essential_facts_optional_toggle_and_provider_fields(tmp_path):

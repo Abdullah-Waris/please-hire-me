@@ -13,6 +13,7 @@ let state = null,
 let refreshing = null;
 let backupBusy = false;
 let renderedAccountSignature = null;
+let aliasJsonMode = false;
 let accountState = null,
   accountOffset = 0,
   accountBusy = false,
@@ -1142,7 +1143,145 @@ function renderSettings() {
         ? JSON.stringify(v, null, 2)
         : v;
   }
+  renderAliasRows(state.settings.company_aliases);
 }
+
+function addAliasRow(other = "", main = "", focus = false) {
+  const row = el("div", undefined, "company-alias-row"),
+    otherLabel = el("label", "Other name"),
+    mainLabel = el("label", "Main name"),
+    otherInput = el("input"),
+    mainInput = el("input"),
+    remove = el("button", "Remove", "secondary");
+  otherInput.dataset.aliasOther = "true";
+  mainInput.dataset.aliasMain = "true";
+  otherInput.value = other;
+  mainInput.value = main;
+  otherInput.maxLength = mainInput.maxLength = 200;
+  otherInput.required = mainInput.required = true;
+  otherInput.disabled = mainInput.disabled = aliasJsonMode;
+  otherLabel.append(otherInput);
+  mainLabel.append(mainInput);
+  remove.type = "button";
+  remove.setAttribute(
+    "aria-label",
+    other ? `Remove alternate name ${other}` : "Remove alternate company name",
+  );
+  otherInput.addEventListener("input", () =>
+    remove.setAttribute(
+      "aria-label",
+      otherInput.value.trim()
+        ? `Remove alternate name ${otherInput.value.trim()}`
+        : "Remove alternate company name",
+    ),
+  );
+  remove.onclick = () => {
+    row.remove();
+    $("#alias-json-field textarea").dispatchEvent(
+      new Event("input", { bubbles: true }),
+    );
+    $("#add-company-alias").focus();
+    updateAliasEmpty();
+  };
+  row.append(otherLabel, mainLabel, remove);
+  $("#company-alias-rows").append(row);
+  updateAliasEmpty();
+  if (focus) otherInput.focus();
+}
+function updateAliasEmpty() {
+  const rows = $("#company-alias-rows");
+  rows.querySelector(".help")?.remove();
+  if (!rows.querySelector(".company-alias-row"))
+    rows.append(
+      el(
+        "p",
+        "No alternate names saved. Add one only when an employer uses more than one name.",
+        "help",
+      ),
+    );
+}
+function renderAliasRows(aliases) {
+  $("#company-alias-rows").replaceChildren();
+  for (const [other, main] of Object.entries(aliases || {}))
+    addAliasRow(other, main);
+  updateAliasEmpty();
+}
+function readAliasRows() {
+  const aliases = Object.create(null),
+    keys = new Set();
+  for (const row of document.querySelectorAll(
+    "#company-alias-rows .company-alias-row",
+  )) {
+    const other = row.querySelector("[data-alias-other]").value.trim(),
+      main = row.querySelector("[data-alias-main]").value.trim(),
+      key = other.toLowerCase().replace(/[^a-z0-9]/g, "");
+    if (!other || !main)
+      throw new Error("Fill both company names, or remove the empty row.");
+    if (!key)
+      throw new Error(
+        "The other company name needs at least one letter from A–Z or a number.",
+      );
+    if (keys.has(key))
+      throw new Error(
+        `“${other}” repeats another alternate name. Keep one mapping for each name.`,
+      );
+    keys.add(key);
+    aliases[other] = main;
+  }
+  return aliases;
+}
+function readAliasJson() {
+  try {
+    const value = JSON.parse($("#alias-json-field textarea").value || "{}");
+    if (
+      !value ||
+      Array.isArray(value) ||
+      typeof value !== "object" ||
+      Object.values(value).some((v) => typeof v !== "string")
+    )
+      throw new Error();
+    return value;
+  } catch {
+    throw new Error(
+      'Company aliases must be a valid JSON object, for example {"Acme Inc": "Acme"}.',
+    );
+  }
+}
+$("#add-company-alias").onclick = () => {
+  addAliasRow("", "", true);
+  $("#alias-json-field textarea").dispatchEvent(
+    new Event("input", { bubbles: true }),
+  );
+};
+$("#alias-json-toggle").onclick = () => {
+  try {
+    if (aliasJsonMode) renderAliasRows(readAliasJson());
+    else
+      $("#alias-json-field textarea").value = JSON.stringify(
+        readAliasRows(),
+        null,
+        2,
+      );
+    aliasJsonMode = !aliasJsonMode;
+    $("#company-alias-rows").hidden = aliasJsonMode;
+    $("#alias-json-field").hidden = !aliasJsonMode;
+    $("#add-company-alias").hidden = aliasJsonMode;
+    $("#alias-json-toggle").textContent = aliasJsonMode
+      ? "Use name fields"
+      : "Edit as JSON";
+    $("#alias-json-toggle").setAttribute(
+      "aria-expanded",
+      String(aliasJsonMode),
+    );
+    for (const input of document.querySelectorAll("#company-alias-rows input"))
+      input.disabled = aliasJsonMode;
+    $("#alias-error").hidden = true;
+    if (aliasJsonMode) $("#alias-json-field textarea").focus();
+  } catch (error) {
+    $("#alias-error").textContent = error.message;
+    $("#alias-error").hidden = false;
+  }
+};
 function renderRuns() {
   const parent = $("#runs");
   parent.replaceChildren();
@@ -1370,18 +1509,14 @@ $("#settings-form").onsubmit = async (event) => {
   event.preventDefault();
   try {
     const data = {};
+    if (!aliasJsonMode)
+      $("#alias-json-field textarea").value = JSON.stringify(readAliasRows());
     for (const input of event.target.elements) {
       if (!input.name) continue;
       if (input.type === "checkbox") data[input.name] = input.checked;
       else if (input.type === "number") data[input.name] = Number(input.value);
       else if (input.name === "company_aliases") {
-        try {
-          data[input.name] = JSON.parse(input.value || "{}");
-        } catch {
-          throw new Error(
-            'Company aliases must be a valid JSON object, for example {"Acme Inc": "Acme"}.',
-          );
-        }
+        data[input.name] = readAliasJson();
       } else if (Array.isArray(state.settings[input.name]))
         data[input.name] = input.value
           .split("\n")
@@ -2217,6 +2352,7 @@ function organizePreferences() {
         "prior_employers",
         "max_per_company",
         "company_cooldown_days",
+        "company_aliases",
       ],
     ],
     [
@@ -2244,7 +2380,7 @@ function organizePreferences() {
     [
       "Advanced browser settings",
       "Change these only if you need a particular browser or already use signed-in employer portals.",
-      ["browser_channel", "signed_in_portals", "company_aliases"],
+      ["browser_channel", "signed_in_portals"],
     ],
   ];
   for (const [title, description, keys] of sections) {
@@ -2256,7 +2392,10 @@ function organizePreferences() {
     );
     for (const key of keys) {
       const input = grid.querySelector(`[name="${key}"]`);
-      if (input) fields.append(input.closest("label"));
+      if (input)
+        fields.append(
+          input.closest("[data-preference-field]") || input.closest("label"),
+        );
     }
     group.append(fields);
     grid.before(group);

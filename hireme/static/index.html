@@ -719,13 +719,48 @@
                 >Signed-in portal hosts<textarea
                   name="signed_in_portals"
                   rows="3"
-                ></textarea></label
-              ><label
-                >Company aliases (JSON object)<textarea
-                  name="company_aliases"
-                  rows="3"
-                ></textarea></label
-              ><label
+                ></textarea>
+              </label>
+              <div id="company-alias-editor" data-preference-field>
+                <h3>Alternate company names</h3>
+                <p class="help">
+                  Group different names for the same employer so exclusions and
+                  company limits apply consistently. For example, map “Acme Inc”
+                  to “Acme”.
+                </p>
+                <div id="company-alias-rows"></div>
+                <div class="actions">
+                  <button
+                    id="add-company-alias"
+                    type="button"
+                    class="secondary"
+                  >
+                    Add another name
+                  </button>
+                  <button
+                    id="alias-json-toggle"
+                    type="button"
+                    class="secondary"
+                    aria-expanded="false"
+                    aria-controls="alias-json-field"
+                  >
+                    Edit as JSON
+                  </button>
+                </div>
+                <label id="alias-json-field" hidden
+                  >Company aliases (JSON object)<textarea
+                    name="company_aliases"
+                    rows="5"
+                  ></textarea>
+                </label>
+                <p
+                  id="alias-error"
+                  class="error-message"
+                  role="alert"
+                  hidden
+                ></p>
+              </div>
+              <label
                 >Full-time minimum USD/year<input
                   name="min_annual_usd"
                   type="number"
