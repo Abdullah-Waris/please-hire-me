@@ -1710,3 +1710,21 @@ pre {
 .diagnostic-check p {
   margin: 8px 0;
 }
+
+#material-filter-form {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: 12px;
+}
+#material-filter-form label,
+#material-filter-form input,
+#material-filter-form select {
+  min-width: 0;
+  width: 100%;
+}
+@media (max-width: 600px) {
+  #material-filter-form {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

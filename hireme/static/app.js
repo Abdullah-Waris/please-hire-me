@@ -1,6 +1,8 @@
 "use strict";
 let materialOffset = 0;
 let materialPagingBusy = false;
+let materialSearch = "",
+  materialStatus = "all";
 let token = new URLSearchParams(location.hash.slice(1)).get("token") || "";
 try {
   token ||= sessionStorage.getItem("hireme-token") || "";
@@ -2048,7 +2050,7 @@ async function refresh() {
   }
   refreshing = (async () => {
     try {
-      state = await api("/api/state?material_offset=" + materialOffset);
+      state = await api(materialStateUrl(materialOffset));
       render();
       await loadLedger(false);
       $("#connection-status").hidden = true;
@@ -2557,33 +2559,67 @@ function materialDrafts() {
     dirtyForms.has(form),
   );
 }
-async function changeMaterialPage(offset) {
+function materialStateUrl(
+  offset,
+  search = materialSearch,
+  status = materialStatus,
+) {
+  const query = new URLSearchParams({ material_offset: offset });
+  if (search) query.set("material_search", search);
+  if (status !== "all") query.set("material_status", status);
+  return "/api/state?" + query;
+}
+$("#material-filter-form").onsubmit = (event) => {
+  event.preventDefault();
+  return changeMaterialPage(
+    0,
+    $("#material-search").value,
+    $("#material-filter").value,
+  );
+};
+$("#clear-material-filter").onclick = async () => {
+  if (await changeMaterialPage(0, "", "all")) {
+    $("#material-search").value = "";
+    $("#material-filter").value = "all";
+  }
+};
+async function changeMaterialPage(
+  offset,
+  search = materialSearch,
+  status = materialStatus,
+) {
   if (refreshing) await refreshing;
   if (materialPagingBusy) return;
   if (materialDrafts())
     return note(
-      "Save your source edits or choose Discard excerpt edits before changing pages.",
+      "Save your source edits or choose Discard excerpt edits before changing pages or filters.",
       true,
     );
   const list = $("#material-list"),
-    controls = [...list.querySelectorAll("input,textarea,select,button")].map(
-      (control) => [control, control.disabled],
-    );
+    controls = [
+      ...document.querySelectorAll(
+        "#material-list input,#material-list textarea,#material-list select,#material-list button,#material-filter-form input,#material-filter-form select,#material-filter-form button",
+      ),
+    ].map((control) => [control, control.disabled]);
   materialPagingBusy = true;
   controls.forEach(([control]) => (control.disabled = true));
   list.setAttribute("aria-busy", "true");
   try {
-    const result = await api("/api/state?material_offset=" + offset);
+    const result = await api(materialStateUrl(offset, search, status));
     state = result;
     materialOffset = result.material_offset;
+    materialSearch = result.material_search;
+    materialStatus = result.material_status;
+    controls.forEach(([control, disabled]) => (control.disabled = disabled));
     materialPagingBusy = false;
     document.activeElement.blur();
     render();
     list.focus();
     list.scrollIntoView({ block: "start" });
+    return true;
   } catch (error) {
     note(
-      `Could not change source pages. ${error.message} Try the page button again.`,
+      `Could not change source pages. ${error.message} Try your search or page button again.`,
       true,
     );
     controls.forEach(([control, disabled]) => (control.disabled = disabled));
@@ -2595,6 +2631,9 @@ async function changeMaterialPage(offset) {
 function renderMaterials() {
   if (materialPagingBusy) return;
   materialOffset = state.material_offset;
+  const filterSummary = `${state.material_count} matching source${state.material_count === 1 ? "" : "s"} of ${state.material_total} in your library${materialSearch ? ` · Search: ${materialSearch}` : ""}${materialStatus !== "all" ? ` · ${$("#material-filter option[value=" + materialStatus + "]").textContent}` : ""}.`;
+  if ($("#material-filter-status").textContent !== filterSummary)
+    $("#material-filter-status").textContent = filterSummary;
   const list = $("#material-list");
   if (
     list.contains(document.activeElement) ||
@@ -2624,7 +2663,9 @@ function renderMaterials() {
   if (!state.materials.length)
     return empty(
       list,
-      "Upload a writing sample, cover-letter example or supporting document to begin. Each source gets a review before the model uses it.",
+      state.material_total
+        ? "No sources match these filters. Try another search or choose Clear filters."
+        : "Upload a writing sample, cover-letter example or supporting document to begin. Each source gets a review before the model uses it.",
     );
   for (const source of state.materials) {
     const box = el("article", undefined, "section");

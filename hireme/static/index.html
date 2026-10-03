@@ -887,6 +887,30 @@
               approve the selected use.</label
             ><button>Save approved context</button>
           </form>
+          <form id="material-filter-form" class="actions section">
+            <label
+              >Search your sources<input
+                id="material-search"
+                type="search"
+                maxlength="200"
+                placeholder="Filename or excerpt text"
+            /></label>
+            <label
+              >Approved use<select id="material-filter">
+                <option value="all">All sources</option>
+                <option value="review">Needs review</option>
+                <option value="approved">All approved sources</option>
+                <option value="personal">Approved personal experience</option>
+                <option value="style">Approved writing style</option>
+                <option value="reference">Approved background reference</option>
+              </select></label
+            >
+            <button>Search sources</button
+            ><button id="clear-material-filter" type="button" class="secondary">
+              Clear filters
+            </button>
+          </form>
+          <p id="material-filter-status" class="help" role="status"></p>
           <div
             id="material-list"
             tabindex="-1"
