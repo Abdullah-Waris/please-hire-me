@@ -49,6 +49,8 @@ SNAPSHOT=r"""selector => {
   let type=el.tagName==='SELECT'?'select':el.tagName==='TEXTAREA'?'textarea':el.getAttribute('role')==='combobox'?'combobox':el.type||'text';
   let indices=[index]; let question=label(el); let options=[]; let value=el.value||'';
   let required=el.required||el.getAttribute('aria-required')==='true'||/\*/.test(question);
+  const ashbyHeading=el.closest('fieldset')?.querySelector('.ashby-application-form-question-title')||el.closest('.ashby-application-form-field-entry')?.querySelector('.ashby-application-form-question-title');
+  required=required||!!ashbyHeading?.className.includes('_required_');
   if(type==='file'){
    const upload=el.closest('.file-upload');
    if(upload)required=required||/\*/.test(upload.innerText.split('\n')[0]);

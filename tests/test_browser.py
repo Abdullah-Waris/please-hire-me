@@ -609,3 +609,10 @@ def test_greenhouse_filename_alone_does_not_prove_upload(store,ats):
         with pytest.raises(Blocked,match='Greenhouse has not acknowledged'):b._verify([],documents,fields)
         b.uploaded_files.add('approved')
         b._verify([],documents,fields)
+
+
+def test_ashby_radio_question_inherits_required_heading(store,ats):
+    with Browser(store,test_url=ats[0]) as b:
+        b.page.set_content('<fieldset class="_fieldEntry_x ashby-application-form-input-radio-group"><label class="ashby-application-form-question-title _required_x">Can you work in our office?</label><label><input type="radio" name="office" value="yes">Yes</label><label><input type="radio" name="office" value="no">No</label></fieldset>')
+        f=b._snapshot()[0]
+        assert f['required'] and f['type']=='radio' and f['label']=='Can you work in our office?'
