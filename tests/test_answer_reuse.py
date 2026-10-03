@@ -299,6 +299,12 @@ def test_hq_work_question_uses_confirmed_onsite_preference(store,job):
     assert resolve(store,job['host'],question,context=job)['value']=='Yes'
 
 
+def test_current_location_wording_uses_verified_geographic_option(store,job):
+    store.put_facts({'location':'Berkeley, CA'})
+    question=field('Where are you currently located?','combobox',['Berkeley, California, United States','Boston, Massachusetts, United States'])
+    assert resolve(store,job['host'],question,context=job)['value']=='Berkeley, California, United States'
+
+
 def test_tailored_answers_can_use_resume_without_separate_templates_and_revalidate_hash(store,job):
     from reportlab.pdfgen import canvas
     import io,hashlib

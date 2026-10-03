@@ -39,6 +39,7 @@ def field_key(label):
         return 'high_school' if not re.search(r'gpa|grade|year|date|graduat|degree|diploma',label) else None
     for pattern,key in RULES:
         if re.fullmatch(pattern,label): return key
+    if re.fullmatch(r'where are you (?:currently )?(?:located|based|living)',label):return 'location'
     if re.search(r"(?:which|what).*(?:college|university|school).*(?:attend|enroll)|name of (?:your |the )?(?:college|university|school)",label):return 'school'
     if re.fullmatch(r"(?:current |pursuing |academic )?degree(?: type)?",label):return 'degree'
     if re.search(r'when.*(?:expect|plan).*graduat|(?:expected|anticipated).*graduation|what year.*graduat',label):return 'graduation'
