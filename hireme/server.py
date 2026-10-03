@@ -82,7 +82,7 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
             store=Store(root)
             try:
                 if path=='/api/state':
-                    try:offset=int(parse_qs(urlsplit(self.path).query).get('material_offset',['0'])[0]);snapshot=store.snapshot(offset)
+                    try:offset=int(parse_qs(urlsplit(self.path).query).get('material_offset',['0'])[0]);snapshot=store.snapshot(offset,include_packages=False)
                     except ValueError:return self.send(400,{'error':'Invalid material page'})
                     from .gmail import status as gmail_status
                     from .reports import report_status
@@ -110,9 +110,14 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     query=parse_qs(urlsplit(self.path).query)
                     try:
                         result=search_jobs(store,search=query.get('search',[''])[0],status=query.get('status',['all'])[0],
-                            sort=query.get('sort',['recent'])[0],offset=int(query.get('offset',['0'])[0]))
+                            sort=query.get('sort',['recent'])[0],offset=int(query.get('offset',['0'])[0]),include_packages=False)
                     except ValueError as error:return self.send(400,{'error':str(error)})
                     return self.send(200,result)
+                if path.startswith('/api/application/'):
+                    try:record=store.application_record(unquote(path[len('/api/application/'):]))
+                    except ValueError as error:return self.send(400,{'error':str(error)})
+                    if not record:return self.send(404,{'error':'Application record not found'})
+                    return self.send(200,{'application':record})
                 if path=='/api/schedule':
                     if demo:return self.send(200,{'installed':False,'demo':True})
                     from .scheduler import status

@@ -537,6 +537,8 @@ def test_clearing_optional_fact_stops_reuse_and_survives_reload(store):
 def test_opportunity_dialog_and_approved_wording_edits(store, job):
     from playwright.sync_api import sync_playwright, expect
     store.put_template('project', 'I built a Python service and tested every deployment.')
+    job['description'] += '\n' + 'Synthetic long posting text for scrolling verification. ' * 150
+    store.upsert_job(job)
     store.block(job['id'], 'captcha_blocked')
     sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
     process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
@@ -557,6 +559,8 @@ def test_opportunity_dialog_and_approved_wording_edits(store, job):
             expect(page.locator('#job-dialog-link')).to_have_attribute('href', job['url'])
             expect(page.locator('#close-job-dialog')).to_be_focused()
             assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            page.locator('#job-dialog').evaluate('(dialog)=>dialog.scrollTop=dialog.scrollHeight')
+            expect(page.locator('#close-job-dialog')).to_be_in_viewport()
             page.keyboard.press('Escape')
             expect(page.get_by_role('dialog')).to_be_hidden(); expect(details).to_be_focused()
             page.locator('[data-view=profile]').click()
@@ -794,5 +798,73 @@ def test_company_shortcut_preserves_preference_drafts_and_shows_dialog_errors(st
             expect(page.locator('#skip-job-company')).to_have_text('Company is skipped')
             expect(page.locator('#skip-job-company')).to_be_disabled()
             assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            browser.close()
+    finally: process.terminate(); process.join(5)
+
+
+def test_record_evidence_loads_on_demand_retries_and_stays_open_after_refresh(store, job, package):
+    from playwright.sync_api import sync_playwright, expect
+    aid = store.prepare(job, package); store.begin_submit(aid); store.finish(aid, 'unknown')
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        try: urllib.request.urlopen(base + '/api/application/' + aid); assert False
+        except urllib.error.HTTPError as error: assert error.code == 403
+        for endpoint in ('state', 'jobs'):
+            request = urllib.request.Request(base + '/api/' + endpoint, headers={'X-Hireme-Token': 'fixture-capability'})
+            with urllib.request.urlopen(request) as response:
+                payload = json.loads(response.read())
+                assert 'package' not in payload['applications'][0]
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(); requests = []; errors = []; images = []
+            screenshot_directory = store.root / 'screenshots'; screenshot_directory.mkdir(mode=0o700, exist_ok=True)
+            page.screenshot(path=str(screenshot_directory / 'synthetic-confirmation.jpg'), type='jpeg')
+            store.db.execute('UPDATE applications SET screenshot=? WHERE id=?', ('synthetic-confirmation.jpg', aid))
+            page.on('request', lambda request: requests.append(request.url) if '/api/application/' in request.url else None)
+            page.on('request', lambda request: images.append(request.url) if '/api/screenshot/' in request.url else None)
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(base + '/#token=fixture-capability')
+            summary = page.locator('#jobs').get_by_text('Answers & evidence', exact=True)
+            expect(summary).to_be_visible()
+            assert not requests
+            page.route('**/api/application/*', lambda route: route.fulfill(status=503, json={'error': 'Synthetic temporary outage'}))
+            summary.click()
+            expect(page.locator('#jobs')).to_contain_text('Synthetic temporary outage')
+            page.unroute('**/api/application/*')
+            page.locator('#jobs').get_by_role('button', name='Retry evidence').click()
+            expect(page.locator('#jobs')).to_contain_text(store.facts()['email']['value'])
+            assert len(requests) == 2
+            page.route('**/api/screenshot/*', lambda route: route.fulfill(status=200, body='Synthetic invalid image', content_type='image/jpeg'))
+            page.locator('#jobs').get_by_role('button', name='View confirmation').click()
+            expect(page.locator('#jobs')).to_contain_text('The recorded image could not be displayed')
+            page.unroute('**/api/screenshot/*')
+            page.locator('#jobs').get_by_role('button', name='View confirmation').click()
+            expect(page.locator('#jobs img.evidence')).to_be_visible()
+            assert len(images) == 2
+            summary.focus(); page.evaluate('refresh()')
+            expect(summary.locator('..')).to_have_attribute('open', '')
+            expect(summary).to_be_focused()
+            expect(page.locator('#jobs')).to_contain_text(store.facts()['email']['value'])
+            assert len(requests) == 2
+            expect(page.locator('#jobs img.evidence')).to_be_visible()
+            assert len(images) == 2
+            summary.click(); summary.click()
+            expect(page.locator('#jobs')).to_contain_text(store.facts()['email']['value'])
+            assert len(requests) == 2 and not errors
+            diagnostic = page.locator('#jobs .diagnostic summary')
+            diagnostic.click(); page.evaluate('refresh()')
+            expect(page.locator('#jobs .diagnostic')).to_have_attribute('open', '')
+            expect(diagnostic).to_be_focused()
+            store.reconcile(aid, True, 'Synthetic employer verification confirmed submission')
+            page.evaluate('refresh()')
+            expect(page.locator('#jobs')).to_contain_text('Submitted')
+            expect(page.locator('#jobs')).to_contain_text(store.facts()['email']['value'])
+            assert len(requests) == 3
+            expect(page.locator('#jobs').get_by_role('button', name='View confirmation')).to_be_visible()
+            assert len(images) == 2 and not errors
             browser.close()
     finally: process.terminate(); process.join(5)

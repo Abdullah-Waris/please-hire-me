@@ -171,7 +171,7 @@ def main(argv=None):
             store.update_settings({'interview_companies':sorted(set(store.settings()['interview_companies'])|set(companies))})
             print(json.dumps({'blocked_companies':companies}))
         elif args.command=='status':
-            print(json.dumps({'missing_setup':store.missing_setup(),'settings':store.settings(),'runs':store.snapshot()['runs']},indent=2))
+            print(json.dumps({'missing_setup':store.missing_setup(),'settings':store.settings(),'runs':store.snapshot(include_packages=False)['runs']},indent=2))
         elif args.command=='recover':
             from .recovery import recover_interrupted
             print(recover_interrupted(store)['message'])

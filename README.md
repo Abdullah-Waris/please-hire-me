@@ -71,6 +71,8 @@ To export job metadata from a terminal:
 
 Choose a new filename; existing files are never overwritten. CSV is an export of opportunities, not a backup of your applicant data.
 
+Open **Answers & evidence** to load an application’s recorded responses and optional confirmation image. Routine refreshes transfer application metadata without full answer packages. Open evidence and diagnostic panels keep their position and keyboard focus across refreshes; a viewed confirmation image stays visible until its application record changes. Evidence caches live only in the current page’s memory.
+
 ### Check your setup
 
 If something is missing, run a local check with actionable next steps:

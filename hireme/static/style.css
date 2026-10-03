@@ -1491,6 +1491,10 @@ pre {
   background: #18283970;
 }
 .dialog-head {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  background: var(--surface);
   display: flex;
   justify-content: space-between;
   align-items: flex-start;

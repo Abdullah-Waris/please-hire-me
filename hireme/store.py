@@ -70,6 +70,8 @@ CREATE INDEX IF NOT EXISTS employer_accounts_state ON employer_accounts(state);
 CREATE INDEX IF NOT EXISTS runs_status_started ON runs(status,started);
 """
 
+APPLICATION_METADATA = 'id,job_id,company_key,state,hash,created,updated,attempted,confirmation,screenshot'
+
 
 class Store:
     def __init__(self, root: Path):
@@ -446,7 +448,13 @@ class Store:
             self.event("human_reconciliation",aid,{"submitted":submitted,"note":note})
         # A not-submitted outcome is deliberately not retried automatically.
 
-    def snapshot(self,material_offset=0):
+    def application_record(self, aid):
+        if not isinstance(aid,str) or not aid or len(aid)>100:
+            raise ValueError('Choose an existing application record')
+        row=self.db.execute('SELECT * FROM applications WHERE id=?',(aid,)).fetchone()
+        return dict(row) if row else None
+
+    def snapshot(self,material_offset=0,include_packages=True):
         if type(material_offset) is not int or not 0<=material_offset<=1000000:raise ValueError("Invalid material page")
         def rows(q,parameters=()): return [dict(x) for x in self.db.execute(q,parameters)]
         from .presentation import attention_sql
@@ -454,7 +462,7 @@ class Store:
         priority=f"({condition} OR EXISTS(SELECT 1 FROM questions q WHERE q.job_id=j.id AND q.resolved=0))"
         return {"settings":self.settings(),"templates":self.templates(),"facts":self.facts(False),"missing_setup":self.missing_setup(),
                 "jobs":rows(f"SELECT j.* FROM jobs j ORDER BY {priority} DESC,j.score DESC,j.first_seen DESC LIMIT 500",parameters),
-                "applications":rows("SELECT * FROM applications ORDER BY (state IN ('unknown','awaiting_verification')) DESC,created DESC LIMIT 500"),
+                "applications":rows(f"SELECT {'*' if include_packages else APPLICATION_METADATA} FROM applications ORDER BY (state IN ('unknown','awaiting_verification')) DESC,created DESC LIMIT 500"),
                 "questions":rows("SELECT * FROM questions WHERE resolved=0 ORDER BY rowid"),
                 "runs":rows("SELECT * FROM runs ORDER BY started DESC LIMIT 30"),
                 "sources":rows("SELECT * FROM sources ORDER BY checked DESC LIMIT 100"),

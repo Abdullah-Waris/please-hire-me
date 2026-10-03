@@ -16,6 +16,9 @@ let scheduleLoaded = false,
   scheduleBusy = false,
   scheduleStatus = null;
 const dirtyForms = new WeakSet();
+const expandedEvidence = new Set(),
+  evidenceCache = new Map(),
+  evidenceImages = new Map();
 document.addEventListener("input", (event) => {
   if (event.target.form) dirtyForms.add(event.target.form);
 });
@@ -310,7 +313,151 @@ function renderLedger() {
     ledgerSignature = signature;
   }
 }
+function evidenceKey(app) {
+  return `${app.id}:${app.updated}:${app.hash}:${app.state}:${app.screenshot || ""}`;
+}
+async function loadEvidence(app, parent) {
+  if (parent.dataset.loading === "true" || parent.dataset.loaded === "true")
+    return;
+  parent.dataset.loading = "true";
+  parent.setAttribute("aria-busy", "true");
+  parent.replaceChildren(el("p", "Loading recorded answers…", "help"));
+  const key = evidenceKey(app);
+  try {
+    if (!evidenceCache.has(key)) {
+      const request =
+        typeof app.package === "string"
+          ? Promise.resolve(app)
+          : api("/api/application/" + encodeURIComponent(app.id)).then(
+              (result) => result.application,
+            );
+      evidenceCache.set(key, request);
+      request.catch(() => {
+        if (evidenceCache.get(key) === request) evidenceCache.delete(key);
+      });
+      if (evidenceCache.size > 100)
+        evidenceCache.delete(evidenceCache.keys().next().value);
+    }
+    const record = await evidenceCache.get(key);
+    if (!parent.isConnected) return;
+    renderEvidence(record, parent);
+    parent.dataset.loaded = "true";
+  } catch (error) {
+    evidenceCache.delete(key);
+    if (!parent.isConnected) return;
+    const message = el(
+        "p",
+        `Recorded evidence could not be loaded: ${error.message}`,
+        "help",
+      ),
+      retry = el("button", "Retry evidence", "secondary");
+    message.setAttribute("role", "alert");
+    retry.type = "button";
+    retry.onclick = () => loadEvidence(app, parent);
+    parent.replaceChildren(message, retry);
+  } finally {
+    delete parent.dataset.loading;
+    parent.removeAttribute("aria-busy");
+  }
+}
+
+function renderEvidence(app, parent) {
+  let parsed;
+  try {
+    parsed = JSON.parse(app.package);
+  } catch {
+    throw new Error("The stored answer package could not be read.");
+  }
+  if (!Array.isArray(parsed.answers))
+    throw new Error("The stored answer package is incomplete.");
+  const list = el("ul", undefined, "answer-log");
+  for (const answer of parsed.answers) {
+    const li = el("li"),
+      provenance = answer.provenance || {};
+    li.append(
+      el("strong", answer.field?.label || "Recorded field"),
+      el("p", answer.value),
+      el(
+        "small",
+        provenance.fact_key
+          ? `Verified fact: ${state.fact_labels[provenance.fact_key] || provenance.fact_key}`
+          : provenance.sample_parts
+            ? "Your approved writing samples"
+            : provenance.template_id
+              ? "Your approved writing sample"
+              : provenance.resume_quote
+                ? "Verified resume evidence"
+                : provenance.job_source
+                  ? "Recorded discovery source"
+                  : provenance.contextual_preference
+                    ? "Selected from your confirmed skills and availability"
+                    : provenance.job_title
+                      ? "Role from this posting"
+                      : "Your saved answer",
+      ),
+    );
+    list.append(li);
+  }
+  if (!parsed.answers.length)
+    list.append(el("li", "No recorded answers for this attempt."));
+  parent.replaceChildren(list);
+  if (app.screenshot) {
+    const button = el("button", "View confirmation", "secondary"),
+      feedback = el("p", "", "help");
+    button.type = "button";
+    const imageKey = evidenceKey(app);
+    const showImage = (blob) => {
+      const img = el("img"),
+        url = URL.createObjectURL(blob);
+      img.src = url;
+      img.alt = "Recorded page after submission";
+      img.className = "evidence";
+      img.onload = () => URL.revokeObjectURL(url);
+      img.onerror = () => {
+        URL.revokeObjectURL(url);
+        evidenceImages.delete(imageKey);
+        feedback.textContent =
+          "The recorded image could not be displayed. Try again or verify the outcome at the employer.";
+        feedback.setAttribute("role", "alert");
+        button.disabled = false;
+        img.replaceWith(button);
+      };
+      button.replaceWith(img);
+    };
+    button.onclick = async () => {
+      button.disabled = true;
+      feedback.textContent = "";
+      try {
+        const response = await fetch(
+          "/api/screenshot/" + encodeURIComponent(app.screenshot),
+          { headers: { "X-Hireme-Token": token } },
+        );
+        if (!response.ok)
+          throw new Error(
+            "Screenshot unavailable. Try again or verify the outcome at the employer.",
+          );
+        const blob = await response.blob();
+        evidenceImages.set(imageKey, blob);
+        if (evidenceImages.size > 10)
+          evidenceImages.delete(evidenceImages.keys().next().value);
+        showImage(blob);
+      } catch (error) {
+        feedback.textContent = error.message;
+        feedback.setAttribute("role", "alert");
+        button.disabled = false;
+      }
+    };
+    parent.append(button, feedback);
+    if (evidenceImages.has(imageKey)) showImage(evidenceImages.get(imageKey));
+  }
+}
+
 function table(jobs, parent, filtered = false) {
+  const focusedEvidence =
+    parent.contains(document.activeElement) &&
+    document.activeElement.tagName === "SUMMARY"
+      ? document.activeElement.parentElement.dataset.evidenceId
+      : null;
   parent.replaceChildren();
   if (!jobs.length) {
     const mainLedger = parent.id === "jobs";
@@ -404,71 +551,30 @@ function table(jobs, parent, filtered = false) {
     ).find((x) => x.job_id === job.id);
     if (app) {
       const detail = el("details");
+      detail.dataset.evidenceId = app.id;
       detail.append(el("summary", "Answers & evidence"));
-      const list = el("ul", undefined, "answer-log");
-      let answers = [];
-      try {
-        answers = JSON.parse(app.package).answers || [];
-      } catch {}
-      for (const answer of answers) {
-        const li = el("li"),
-          provenance = answer.provenance || {};
-        li.append(
-          el("strong", answer.field.label),
-          el("p", answer.value),
-          el(
-            "small",
-            provenance.fact_key
-              ? `Verified fact: ${provenance.fact_key}`
-              : provenance.sample_parts
-                ? "Your approved writing samples"
-                : provenance.template_id
-                  ? "Your approved writing sample"
-                  : provenance.resume_quote
-                    ? "Verified resume evidence"
-                    : provenance.job_source
-                      ? "Recorded discovery source"
-                      : provenance.contextual_preference
-                        ? "Selected from your confirmed skills and availability"
-                        : provenance.job_title
-                          ? "Role from this posting"
-                          : "Your saved answer",
-          ),
-        );
-        list.append(li);
-      }
-      if (!answers.length)
-        list.append(el("li", "No recorded answers for this attempt."));
-      detail.append(list);
-      if (app.screenshot) {
-        const btn = el("button", "View confirmation", "secondary");
-        btn.type = "button";
-        btn.onclick = async () => {
-          btn.disabled = true;
-          try {
-            const r = await fetch(
-              "/api/screenshot/" + encodeURIComponent(app.screenshot),
-              { headers: { "X-Hireme-Token": token } },
-            );
-            if (!r.ok) throw new Error("Screenshot unavailable");
-            const img = el("img"),
-              url = URL.createObjectURL(await r.blob());
-            img.src = url;
-            img.alt = "Recorded page after submission";
-            img.className = "evidence";
-            img.onload = img.onerror = () => URL.revokeObjectURL(url);
-            btn.replaceWith(img);
-          } catch (e) {
-            note(e.message, true);
-            btn.disabled = false;
-          }
-        };
-        detail.append(btn);
-      }
+      const evidence = el("div");
+      evidence.setAttribute("aria-live", "polite");
+      detail.append(evidence);
+      const expansionKey = `${parent.id}:${app.id}`;
+      detail.ontoggle = () => {
+        if (detail.open) {
+          expandedEvidence.add(expansionKey);
+          loadEvidence(app, evidence);
+        } else expandedEvidence.delete(expansionKey);
+      };
+      detail.open = expandedEvidence.has(expansionKey);
       d.append(detail);
     } else d.append(el("span", "No attempt yet", "subtle"));
     if (job.reason) {
       const diagnostic = el("details", undefined, "diagnostic");
+      diagnostic.dataset.evidenceId = "diagnostic:" + job.id;
+      const expansionKey = `${parent.id}:diagnostic:${job.id}`;
+      diagnostic.ontoggle = () => {
+        if (diagnostic.open) expandedEvidence.add(expansionKey);
+        else expandedEvidence.delete(expansionKey);
+      };
+      diagnostic.open = expandedEvidence.has(expansionKey);
       diagnostic.append(
         el("summary", "Recorded details"),
         el("p", job.reason, "subtle"),
@@ -480,6 +586,11 @@ function table(jobs, parent, filtered = false) {
   }
   t.append(body);
   parent.append(t);
+  if (focusedEvidence)
+    [...parent.querySelectorAll("details[data-evidence-id]")]
+      .find((detail) => detail.dataset.evidenceId === focusedEvidence)
+      ?.querySelector("summary")
+      .focus({ preventScroll: true });
 }
 function attentionCount() {
   const jobIds = new Set(state.questions.map((q) => q.job_id));

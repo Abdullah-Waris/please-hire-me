@@ -59,7 +59,7 @@ def export_csv(store):
     return output.getvalue().encode('utf-8-sig')
 
 
-def search_jobs(store, search='', status='all', sort='recent', offset=0, limit=50):
+def search_jobs(store, search='', status='all', sort='recent', offset=0, limit=50, include_packages=True):
     """Search the complete ledger with bounded pages and exact display-status semantics."""
     from .presentation import NOT_MATCH_REASONS, WAIT_REASONS
     if not isinstance(search, str) or len(search) > 200:
@@ -109,7 +109,8 @@ def search_jobs(store, search='', status='all', sort='recent', offset=0, limit=5
     jobs = annotate_companies(store, jobs)
     applications = []
     if jobs:
+        from .store import APPLICATION_METADATA
         placeholders = ','.join('?' for _ in jobs)
         applications = [dict(row) for row in store.db.execute(
-            f'SELECT * FROM applications WHERE job_id IN ({placeholders})', [job['id'] for job in jobs])]
+            f"SELECT {'*' if include_packages else APPLICATION_METADATA} FROM applications WHERE job_id IN ({placeholders})", [job['id'] for job in jobs])]
     return {'jobs': jobs, 'applications': applications, 'total': total, 'offset': offset, 'limit': limit}
