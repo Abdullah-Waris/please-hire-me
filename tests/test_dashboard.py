@@ -2129,3 +2129,49 @@ def test_saved_views_browser_restore_filters_retry_and_preserve_private_drafts(s
             assert not store.db.execute('SELECT * FROM model_requests').fetchone()
             browser.close()
     finally:process.terminate();process.join(5)
+
+
+def test_tool_search_navigates_without_writes_and_preserves_drafts_and_keyboard_focus(store,job):
+    from playwright.sync_api import sync_playwright,expect
+    before=store.snapshot()
+    sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port));process.start()
+    base=f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try:urllib.request.urlopen(base).close();break
+            except OSError:time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch();page=browser.new_page(viewport={'width':320,'height':844},reduced_motion='reduce')
+            errors=[];writes=[]
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.on('request',lambda request:writes.append(request.url) if request.method=='POST' else None)
+            page.goto(base+'/#token=fixture-capability');expect(page.locator('#run')).to_be_enabled()
+            assert page.evaluate('toolDestinations.every(item=>document.querySelector(item.target))')
+            page.locator('[data-view=settings]').click();page.locator('#settings-form [name=schedule_hours]').fill('7')
+            origin=page.locator('#settings-form [name=schedule_hours]');origin.focus()
+            page.keyboard.press('Control+k')
+            expect(page.locator('#tool-dialog')).to_be_visible();expect(page.locator('#tool-search')).to_be_focused()
+            page.locator('#tool-search').fill('no-such-tool');expect(page.locator('#tool-search-results')).to_contain_text('No tools match')
+            page.keyboard.press('Escape');expect(page.locator('#tool-dialog')).to_be_hidden();expect(origin).to_be_focused()
+            page.locator('#find-tool').click();page.locator('#tool-search').fill('resume')
+            page.keyboard.press('ArrowDown');expect(page.locator('.tool-result').first).to_be_focused()
+            page.keyboard.press('ArrowUp');expect(page.locator('.tool-result').last).to_be_focused()
+            page.keyboard.press('Home');expect(page.locator('.tool-result').first).to_be_focused()
+            page.keyboard.press('Enter');expect(page.locator('#tool-dialog')).to_be_hidden()
+            expect(page.locator('#profile')).to_be_visible();expect(page.locator('#resume-state')).to_be_focused()
+            page.locator('#find-tool').click();page.locator('#tool-search').fill('check history backup');page.keyboard.press('Enter')
+            expect(page.locator('#backup-check-panel')).to_have_attribute('open','');expect(page.locator('#backup-check-panel')).to_be_focused()
+            expect(origin).to_have_value('7')
+            page.locator('#find-tool').click();page.locator('#tool-search').fill('password');page.keyboard.press('Enter')
+            expect(page.locator('#account-transfer-panel')).to_have_attribute('open','');expect(page.locator('#questions')).to_be_visible()
+            page.locator('[data-view=today]').click();page.locator('#jobs .opportunity-details').first.click()
+            expect(page.locator('#job-dialog')).to_be_visible();page.keyboard.press('Control+k')
+            expect(page.locator('#job-dialog')).to_be_hidden();expect(page.locator('#tool-dialog')).to_be_visible()
+            assert page.evaluate('document.body.classList.contains("dialog-open")')
+            page.locator('#close-tool-dialog').click();expect(page.locator('#tool-dialog')).to_be_hidden()
+            assert not page.evaluate('document.body.classList.contains("dialog-open")')
+            assert not writes and not errors and page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            browser.close()
+        assert store.snapshot()==before
+    finally:process.terminate();process.join(5)

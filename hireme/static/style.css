@@ -260,7 +260,10 @@ main {
   min-width: 0;
 }
 .workspace-topbar {
-  height: 76px;
+  min-height: 76px;
+  padding: 16px 0;
+  gap: 12px;
+  flex-wrap: wrap;
   display: flex;
   justify-content: space-between;
   align-items: center;
@@ -269,6 +272,60 @@ main {
   font-size: 11px;
   letter-spacing: 0.04em;
   margin-bottom: 34px;
+}
+.topbar-tools {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 14px;
+}
+#find-tool {
+  font-size: 12px;
+  letter-spacing: 0;
+  min-height: 44px;
+  padding: 10px 12px;
+}
+.tool-search-content {
+  padding: 24px 28px;
+}
+.tool-dialog .dialog-head button {
+  width: auto;
+  min-width: 68px;
+  flex-shrink: 0;
+  white-space: nowrap;
+  padding: 10px 14px;
+}
+.tool-search-content > label {
+  display: block;
+  font-size: 13px;
+  margin-bottom: 8px;
+}
+.tool-search-content > input {
+  width: 100%;
+}
+.tool-result {
+  width: 100%;
+  display: block;
+  text-align: left;
+  white-space: normal;
+  margin: 8px 0;
+  padding: 14px 16px;
+  overflow-wrap: anywhere;
+}
+.tool-result strong,
+.tool-result span {
+  display: block;
+}
+.tool-result span {
+  margin-top: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 400;
+}
+@media (max-width: 600px) {
+  .tool-search-content {
+    padding: 20px;
+  }
 }
 .local-label {
   display: flex;

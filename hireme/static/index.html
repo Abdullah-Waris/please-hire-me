@@ -106,10 +106,21 @@
           ><code>hireme dashboard</code>
         </div>
         <div class="workspace-topbar">
-          <span id="workspace-date">YOUR APPLICATION WORKSPACE</span
-          ><span class="local-label"
-            ><span class="privacy-dot"></span> Local &amp; private</span
-          >
+          <span id="workspace-date">YOUR APPLICATION WORKSPACE</span>
+          <div class="topbar-tools">
+            <span class="local-label"
+              ><span class="privacy-dot"></span> Local &amp; private</span
+            >
+            <button
+              id="find-tool"
+              type="button"
+              class="secondary"
+              aria-haspopup="dialog"
+              aria-keyshortcuts="Control+k Meta+k"
+            >
+              <span aria-hidden="true">⌕</span> Find a tool
+            </button>
+          </div>
         </div>
         <header class="page-head">
           <div>
@@ -1667,6 +1678,51 @@ claude auth login</pre
           >Invented opportunity for this sample workspace.</span
         >
       </footer>
+    </dialog>
+    <dialog
+      id="tool-dialog"
+      class="job-dialog tool-dialog"
+      aria-labelledby="tool-dialog-title"
+      aria-describedby="tool-dialog-help"
+    >
+      <header class="dialog-head">
+        <div>
+          <h2 id="tool-dialog-title">Find a tool</h2>
+          <p id="tool-dialog-help" class="help">
+            Search by what you want to do. Choosing a tool opens its section.
+          </p>
+        </div>
+        <button
+          id="close-tool-dialog"
+          type="button"
+          class="secondary"
+          aria-label="Close tool search"
+        >
+          Close
+        </button>
+      </header>
+      <div class="tool-search-content">
+        <label for="tool-search">What would you like to do?</label>
+        <input
+          id="tool-search"
+          type="search"
+          maxlength="100"
+          autocomplete="off"
+          placeholder="Try resume, backup or questions"
+          aria-describedby="tool-search-count"
+        />
+        <p
+          id="tool-search-count"
+          class="help"
+          role="status"
+          aria-live="polite"
+        ></p>
+        <div id="tool-search-results"></div>
+        <p class="help">
+          Use Tab or the arrow keys to browse, Enter to open, and Escape to
+          close. Open this search with Ctrl or ⌘ K.
+        </p>
+      </div>
     </dialog>
   </body>
 </html>

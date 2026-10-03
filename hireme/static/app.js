@@ -423,6 +423,343 @@ function show(name) {
     settings: "Choose your search boundaries. Throughput never overrides them.",
   }[name];
 }
+const toolDestinations = [
+  {
+    label: "Upload a resume",
+    description: "Add or repair the PDF that supports your applicant facts.",
+    aliases: "cv curriculum vitae document",
+    view: "profile",
+    target: "#resume-state",
+    common: true,
+  },
+  {
+    label: "Confirm applicant facts",
+    description: "Review personal details and answers you have confirmed.",
+    aliases:
+      "name email phone school education authorization sponsorship skills profile",
+    view: "profile",
+    target: "#facts-form",
+    common: true,
+  },
+  {
+    label: "Review unanswered questions",
+    description: "Resolve questions that need your own answer.",
+    aliases: "needs you missing answer",
+    view: "questions",
+    target: "#question-list",
+    common: true,
+  },
+  {
+    label: "Review uncertain outcomes",
+    description:
+      "Check recorded evidence before marking an application submitted or not submitted.",
+    aliases: "unknown duplicate verification outcome confirmation",
+    view: "questions",
+    target: "#uncertain",
+    common: true,
+  },
+  {
+    label: "Prepare drafts for review",
+    description: "Prepare answers and documents while submissions stay paused.",
+    aliases: "cover letter writing draft preview",
+    view: "today",
+    target: "#prepare-panel",
+    common: true,
+  },
+  {
+    label: "Download history backup",
+    description: "Keep a private copy of documents and application history.",
+    aliases: "export zip restore migrate move computer data",
+    view: "settings",
+    target: "#download-backup",
+    common: true,
+  },
+  {
+    label: "Import a posting spreadsheet",
+    description: "Check a CSV and review its postings before saving them.",
+    aliases: "bulk jobs opportunities excel sheets import",
+    view: "today",
+    target: "#posting-import-panel",
+    common: true,
+  },
+  {
+    label: "Check local setup",
+    description: "Read setup checks and download a redacted support report.",
+    aliases: "doctor troubleshooting diagnostics help error support",
+    view: "setup",
+    target: "#setup-diagnostics",
+    common: true,
+  },
+  {
+    label: "Overview",
+    description: "Browse your opportunity ledger and current progress.",
+    aliases: "home today applications jobs search",
+    view: "today",
+    target: "#heading",
+  },
+  {
+    label: "Needs you",
+    description:
+      "Questions, uncertain applications and employer account checks.",
+    aliases: "attention review blocked captcha",
+    view: "questions",
+    target: "#heading",
+  },
+  {
+    label: "Your facts",
+    description: "Applicant documents and confirmed personal details.",
+    aliases: "profile resume transcript identity",
+    view: "profile",
+    target: "#heading",
+  },
+  {
+    label: "Writing and context",
+    description: "Upload, search and approve sources for application writing.",
+    aliases:
+      "materials samples cover letter personal style reference documents",
+    view: "materials",
+    target: "#heading",
+  },
+  {
+    label: "Preferences",
+    description: "Choose roles, locations, company boundaries and budgets.",
+    aliases: "settings criteria search limits pace timezone",
+    view: "settings",
+    target: "#heading",
+  },
+  {
+    label: "Model connection",
+    description:
+      "Choose a provider and configure its CLI login or API connection.",
+    aliases: "ai claude codex openai anthropic key subscription billing login",
+    view: "providers",
+    target: "#provider-form",
+  },
+  {
+    label: "Email automation",
+    description: "Configure verification email and batch reports.",
+    aliases: "gmail oauth client token mail connect authorization",
+    view: "connections",
+    target: "#heading",
+  },
+  {
+    label: "Setup checklist",
+    description: "Follow the steps for your own application workspace.",
+    aliases: "onboarding first start getting started",
+    view: "setup",
+    target: "#heading",
+  },
+  {
+    label: "Upload an optional transcript",
+    description: "Add, download or withdraw the selected transcript PDF.",
+    aliases: "grades academic education document",
+    view: "profile",
+    target: "#transcript-state",
+  },
+  {
+    label: "Review saved answers",
+    description:
+      "Inspect answers you confirmed for reuse and withdraw outdated ones.",
+    aliases: "question responses reuse revoke",
+    view: "profile",
+    target: "#saved-answers-panel",
+  },
+  {
+    label: "Save opportunity filters",
+    description:
+      "Name your search, status and sorting for one-click reopening.",
+    aliases: "saved views favorites bookmarks prepared filters",
+    view: "today",
+    target: "#saved-views-panel",
+  },
+  {
+    label: "Add a specific posting",
+    description: "Save an official application link and posting details.",
+    aliases: "job opportunity manual url company role",
+    view: "today",
+    target: "#job-form",
+  },
+  {
+    label: "Check a history backup",
+    description:
+      "Test a private ZIP through a temporary restore before moving it.",
+    aliases: "inspect validate restore zip migrate computer",
+    view: "settings",
+    target: "#backup-check-panel",
+  },
+  {
+    label: "Move employer passwords",
+    description:
+      "Export or import encrypted passwords separately from history backups.",
+    aliases: "account credentials transfer passphrase migration computer",
+    view: "questions",
+    target: "#account-transfer-panel",
+  },
+  {
+    label: "Review employer accounts",
+    description: "Check employer account states and record verified outcomes.",
+    aliases: "registration sign in password login uncertain",
+    view: "questions",
+    target: "#employer-accounts",
+  },
+  {
+    label: "Review batch history",
+    description: "Search complete run history and recorded progress.",
+    aliases: "runs logs cycle preparation discovery errors",
+    view: "today",
+    target: "#run-history-panel",
+  },
+  {
+    label: "Review discovery source health",
+    description: "See which job sources were available or need another check.",
+    aliases: "network failed boards sources unavailable search errors",
+    view: "today",
+    target: "#source-health-panel",
+  },
+  {
+    label: "Apply the saved schedule",
+    description: "Review and apply your saved batch interval on this computer.",
+    aliases: "automatic timer scheduler hours cron service daemon",
+    view: "settings",
+    target: "#apply-schedule",
+  },
+];
+let toolSearchOrigin = null,
+  pendingToolDestination = null;
+function renderToolResults() {
+  const query = $("#tool-search").value.trim().toLowerCase();
+  const terms = query.split(/\s+/).filter(Boolean);
+  const results = toolDestinations.filter((item) =>
+    query
+      ? terms.every((term) =>
+          `${item.label} ${item.description} ${item.aliases}`
+            .toLowerCase()
+            .includes(term),
+        )
+      : item.common,
+  );
+  $("#tool-search-count").textContent = query
+    ? `${results.length} ${results.length === 1 ? "tool" : "tools"} found.`
+    : "Common tools. Type to search every section and task.";
+  const parent = $("#tool-search-results");
+  parent.replaceChildren();
+  if (!results.length)
+    parent.append(
+      el(
+        "p",
+        "No tools match that search. Try resume, backup, questions or preferences.",
+        "help",
+      ),
+    );
+  for (const item of results) {
+    const button = el("button", undefined, "secondary tool-result");
+    button.type = "button";
+    button.append(el("strong", item.label), el("span", item.description));
+    button.onclick = () => {
+      pendingToolDestination = item;
+      closeToolSearch();
+    };
+    parent.append(button);
+  }
+}
+function openToolSearch() {
+  const dialog = $("#tool-dialog");
+  if (dialog.open) {
+    $("#tool-search").focus();
+    return;
+  }
+  if ($("#job-dialog").open) $("#job-dialog").close();
+  toolSearchOrigin = document.activeElement;
+  pendingToolDestination = null;
+  $("#tool-search").value = "";
+  renderToolResults();
+  dialog.showModal();
+  document.body.classList.add("dialog-open");
+  $("#tool-search").focus({ preventScroll: true });
+}
+$("#find-tool").onclick = openToolSearch;
+function closeToolSearch() {
+  $("#tool-dialog").close();
+  document.body.classList.toggle("dialog-open", $("#job-dialog").open);
+}
+$("#close-tool-dialog").onclick = closeToolSearch;
+$("#tool-search").oninput = renderToolResults;
+$("#tool-search").onkeydown = (event) => {
+  const buttons = [...$("#tool-search-results").querySelectorAll("button")];
+  if (["ArrowDown", "ArrowUp", "Enter"].includes(event.key)) {
+    event.preventDefault();
+    if (event.key === "Enter") buttons[0]?.click();
+    else (event.key === "ArrowDown" ? buttons[0] : buttons.at(-1))?.focus();
+  }
+};
+$("#tool-search-results").onkeydown = (event) => {
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+  const buttons = [...$("#tool-search-results").querySelectorAll("button")];
+  const index = buttons.indexOf(document.activeElement);
+  if (index < 0 || !buttons.length) return;
+  event.preventDefault();
+  const next =
+    event.key === "Home"
+      ? 0
+      : event.key === "End"
+        ? buttons.length - 1
+        : (index + (event.key === "ArrowDown" ? 1 : -1) + buttons.length) %
+          buttons.length;
+  buttons[next].focus();
+};
+$("#tool-dialog").addEventListener("close", () => {
+  document.body.classList.toggle("dialog-open", $("#job-dialog").open);
+  const destination = pendingToolDestination;
+  pendingToolDestination = null;
+  if (!destination) {
+    if (toolSearchOrigin?.isConnected)
+      toolSearchOrigin.focus({ preventScroll: true });
+    return;
+  }
+  show(destination.view);
+  let target = $(destination.target) || $("#heading");
+  for (let parent = target; parent; parent = parent.parentElement)
+    if (parent.tagName === "DETAILS") parent.open = true;
+  // Navigate to the surrounding section, never activate an action button.
+  if (target.matches("button"))
+    target = target.closest(".section") || $("#heading");
+  target.tabIndex = -1;
+  target.scrollIntoView({
+    block: "start",
+    behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "auto"
+      : "smooth",
+  });
+  target.focus({ preventScroll: true });
+});
+$("#tool-dialog").addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    event.preventDefault();
+    closeToolSearch();
+  }
+});
+$("#tool-dialog").addEventListener("click", (event) => {
+  if (event.target !== event.currentTarget) return;
+  const bounds = event.currentTarget.getBoundingClientRect();
+  if (
+    event.clientX < bounds.left ||
+    event.clientX > bounds.right ||
+    event.clientY < bounds.top ||
+    event.clientY > bounds.bottom
+  )
+    closeToolSearch();
+});
+document.addEventListener("keydown", (event) => {
+  if (
+    (event.ctrlKey || event.metaKey) &&
+    !event.altKey &&
+    !event.shiftKey &&
+    event.key.toLowerCase() === "k"
+  ) {
+    event.preventDefault();
+    openToolSearch();
+  }
+});
 function link(url, text) {
   const a = el("a", text);
   if (!state?.demo && /^https:\/\//.test(url)) {
@@ -4145,7 +4482,7 @@ $("#job-dialog").addEventListener("click", (event) => {
 });
 
 $("#job-dialog").addEventListener("close", () =>
-  document.body.classList.remove("dialog-open"),
+  document.body.classList.toggle("dialog-open", $("#tool-dialog").open),
 );
 
 let backupCheckBusy = false;
