@@ -17,6 +17,8 @@ let state = null,
 let refreshing = null;
 let backupBusy = false;
 let transcriptWithdrawalBusy = false;
+const selectedDownloadBusy = new Set();
+const selectedDownloadHashes = {};
 let postingCheckRequest = 0;
 let diagnosticsResult = null,
   diagnosticsBusy = false;
@@ -445,6 +447,52 @@ async function loadEvidence(app, parent) {
   }
 }
 
+async function downloadPdf(button, feedback, path, filename) {
+  if (button.disabled) return;
+  const returnFocus = document.activeElement === button;
+  button.disabled = true;
+  feedback.textContent = "Preparing your PDF download…";
+  feedback.setAttribute("role", "status");
+  try {
+    const response = await fetch(path, {
+      headers: { "X-Hireme-Token": token },
+    }).catch(() => {
+      throw new Error(
+        "Cannot reach your application desk. Check that the dashboard is still running, then try again.",
+      );
+    });
+    if (!response.ok) {
+      const error = await response.json().catch(() => null);
+      throw new Error(error?.error || "The PDF could not be downloaded.");
+    }
+    if (
+      response.headers.get("Content-Type")?.split(";")[0] !== "application/pdf"
+    )
+      throw new Error(
+        "The server did not return a PDF. Reconnect and try again.",
+      );
+    const url = URL.createObjectURL(await response.blob()),
+      anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    feedback.textContent =
+      "PDF downloaded. Keep this private document in a safe location.";
+  } catch (error) {
+    feedback.textContent = `${error.message} You can try the download again.`;
+    feedback.setAttribute("role", "alert");
+  } finally {
+    button.disabled = false;
+    if (
+      returnFocus &&
+      button.isConnected &&
+      document.activeElement === document.body
+    )
+      button.focus({ preventScroll: true });
+  }
+}
+
 function renderEvidence(app, parent) {
   let parsed;
   try {
@@ -525,58 +573,15 @@ function renderEvidence(app, parent) {
       feedback.setAttribute("role", "status");
       if (attachment.generated === true)
         row.append(el("p", "Generated for this opportunity", "help"));
-      button.onclick = async () => {
-        if (button.disabled) return;
-        const returnFocus = document.activeElement === button;
-        button.disabled = true;
-        feedback.textContent = "Preparing your PDF download…";
-        feedback.setAttribute("role", "status");
-        try {
-          const response = await fetch(
-            `/api/application-document/${encodeURIComponent(app.id)}/${index}/${attachment.hash}`,
-            { headers: { "X-Hireme-Token": token } },
-          ).catch(() => {
-            throw new Error(
-              "Cannot reach your application desk. Check that the dashboard is still running, then try again.",
-            );
-          });
-          if (!response.ok) {
-            const error = await response.json().catch(() => null);
-            throw new Error(
-              error?.error || "The recorded PDF could not be downloaded.",
-            );
-          }
-          if (
-            response.headers.get("Content-Type")?.split(";")[0] !==
-            "application/pdf"
-          )
-            throw new Error(
-              "The server did not return a PDF. Reconnect and try again.",
-            );
-          const url = URL.createObjectURL(await response.blob()),
-            anchor = document.createElement("a");
-          anchor.href = url;
-          anchor.download =
-            attachment.kind === "cover_letter"
-              ? "cover-letter.pdf"
-              : attachment.kind + ".pdf";
-          anchor.click();
-          setTimeout(() => URL.revokeObjectURL(url), 1000);
-          feedback.textContent =
-            "PDF downloaded. Keep this private document in a safe location.";
-        } catch (error) {
-          feedback.textContent = `${error.message} You can try the download again.`;
-          feedback.setAttribute("role", "alert");
-        } finally {
-          button.disabled = false;
-          if (
-            returnFocus &&
-            button.isConnected &&
-            document.activeElement === document.body
-          )
-            button.focus({ preventScroll: true });
-        }
-      };
+      button.onclick = () =>
+        downloadPdf(
+          button,
+          feedback,
+          `/api/application-document/${encodeURIComponent(app.id)}/${index}/${attachment.hash}`,
+          attachment.kind === "cover_letter"
+            ? "cover-letter.pdf"
+            : attachment.kind + ".pdf",
+        );
       row.append(button, feedback);
       documents.append(row);
     });
@@ -1605,6 +1610,50 @@ function renderTemplates() {
     parent.append(details);
   }
 }
+function updateSelectedDownloads() {
+  if (!state) return;
+  for (const kind of ["resume", "transcript"]) {
+    const item = state.documents.find((item) => item.kind === kind),
+      button = $("#download-selected-" + kind),
+      feedback = $("#selected-" + kind + "-feedback");
+    button.hidden = !item;
+    button.disabled =
+      !item ||
+      typeof item.hash !== "string" ||
+      !/^[a-f0-9]{64}$/.test(item.hash) ||
+      item.available === false ||
+      selectedDownloadBusy.has(kind) ||
+      $("#" + kind + "-upload").disabled;
+    feedback.hidden = !item;
+    if (
+      !selectedDownloadBusy.has(kind) &&
+      selectedDownloadHashes[kind] !== item?.hash
+    ) {
+      feedback.textContent = "";
+      feedback.setAttribute("role", "status");
+      selectedDownloadHashes[kind] = item?.hash;
+    }
+  }
+}
+for (const kind of ["resume", "transcript"]) {
+  $("#download-selected-" + kind).onclick = async () => {
+    if (!state) return;
+    const item = state.documents.find((item) => item.kind === kind);
+    if (!item || selectedDownloadBusy.has(kind)) return;
+    selectedDownloadBusy.add(kind);
+    try {
+      await downloadPdf(
+        $("#download-selected-" + kind),
+        $("#selected-" + kind + "-feedback"),
+        `/api/selected-document/${kind}/${item.hash}`,
+        kind + ".pdf",
+      );
+    } finally {
+      selectedDownloadBusy.delete(kind);
+      updateSelectedDownloads();
+    }
+  };
+}
 function renderDocumentStatus() {
   const resume = state.documents.find((document) => document.kind === "resume"),
     transcript = state.documents.find(
@@ -1621,6 +1670,7 @@ function renderDocumentStatus() {
       : "Transcript imported and stored privately. Upload another PDF to replace it."
     : "No transcript imported. Jobs requiring one will appear in Needs you.";
   updateTranscriptWithdrawal();
+  updateSelectedDownloads();
 }
 
 function renderSettings() {
@@ -2213,6 +2263,7 @@ $("#resume-upload").onchange = async (e) => {
     f = input.files[0];
   if (!f) return;
   input.disabled = true;
+  updateSelectedDownloads();
   try {
     const result = await api("/api/resume", f, true);
     note(
@@ -2226,6 +2277,7 @@ $("#resume-upload").onchange = async (e) => {
   } finally {
     input.disabled = false;
     input.value = "";
+    updateSelectedDownloads();
   }
 };
 $("#settings-form").onsubmit = async (event) => {
@@ -2609,6 +2661,7 @@ $("#transcript-upload").onchange = async (e) => {
     f = input.files[0];
   if (!f) return;
   input.disabled = true;
+  updateSelectedDownloads();
   try {
     const result = await api("/api/transcript", f, true);
     note(
@@ -2622,6 +2675,7 @@ $("#transcript-upload").onchange = async (e) => {
   } finally {
     input.disabled = false;
     input.value = "";
+    updateSelectedDownloads();
   }
 };
 

@@ -1861,3 +1861,44 @@ def test_recorded_pdf_download_auth_binding_and_local_retry(store,job,package):
             browser.close()
         assert store.snapshot()==before and store.db.total_changes==changes
     finally: process.terminate(); process.join(5)
+
+
+def test_selected_resume_and_transcript_downloads_preserve_fact_drafts_and_follow_withdrawal(store):
+    from playwright.sync_api import sync_playwright,expect
+    doc=dict(store.db.execute("SELECT * FROM documents WHERE kind='resume'").fetchone())
+    store.db.execute('INSERT INTO documents VALUES(?,?,?)',('transcript',doc['hash'],doc['filename']))
+    expected=(store.root/'documents'/doc['filename']).read_bytes()
+    before=store.snapshot(); changes=store.db.total_changes
+    sock=socket.socket(); sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]; sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port)); process.start()
+    base=f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch(); page=browser.new_page(viewport={'width':320,'height':844},accept_downloads=True)
+            assert page.request.get(base+f"/api/selected-document/resume/{doc['hash']}").status==403
+            page.goto(base+'/#token=fixture-capability')
+            page.locator('[data-view=profile]').click()
+            draft=page.locator('#facts-form [name=first_name]'); draft.fill('Synthetic unsaved name')
+            for kind in ('resume','transcript'):
+                button=page.get_by_role('button',name='Download selected '+kind,exact=True)
+                with page.expect_download() as download: button.click()
+                assert download.value.suggested_filename==kind+'.pdf'
+                assert Path(download.value.path()).read_bytes()==expected
+                expect(button).to_be_focused(); expect(draft).to_have_value('Synthetic unsaved name')
+            assert store.snapshot()==before and store.db.total_changes==changes
+            page.route('**/api/selected-document/resume/**',lambda route:route.abort())
+            page.locator('#download-selected-resume').click()
+            expect(page.locator('#selected-resume-feedback')).to_contain_text('Cannot reach your application desk')
+            expect(page.locator('#download-selected-resume')).to_be_enabled()
+            page.unroute('**/api/selected-document/resume/**')
+            page.locator('#withdraw-transcript').click()
+            expect(page.locator('#download-selected-transcript')).to_be_hidden()
+            expect(draft).to_have_value('Synthetic unsaved name')
+            withdrawn=page.request.get(base+f"/api/selected-document/transcript/{doc['hash']}",headers={'X-Hireme-Token':'fixture-capability'})
+            assert withdrawn.status==400 and (store.root/'documents'/doc['filename']).read_bytes()==expected
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            browser.close()
+    finally: process.terminate(); process.join(5)

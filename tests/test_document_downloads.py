@@ -91,3 +91,44 @@ def test_real_generated_letter_remains_downloadable_after_current_cache_is_remov
     import io
     text=PdfReader(io.BytesIO(data)).pages[0].extract_text()
     assert 'Test Person' in text and 'Acme' in text
+
+
+@pytest.mark.parametrize('kind',['resume','transcript'])
+def test_selected_pdf_download_uses_current_selection_without_writes(store,kind):
+    from hireme.document_downloads import selected_pdf
+    doc=dict(store.db.execute("SELECT * FROM documents WHERE kind='resume'").fetchone())
+    if kind=='transcript': store.db.execute('INSERT INTO documents VALUES(?,?,?)',(kind,doc['hash'],doc['filename']))
+    before=store.snapshot(); changes=store.db.total_changes
+    data,name=selected_pdf(store,kind,doc['hash'])
+    assert data==(store.root/'documents'/doc['filename']).read_bytes() and name==kind+'.pdf'
+    assert store.snapshot()==before and store.db.total_changes==changes
+
+
+def test_selected_pdf_rejects_stale_selection_and_withdrawn_transcript(store,monkeypatch):
+    from hireme.document_downloads import selected_pdf
+    def forbidden(*args): raise AssertionError('Read a stale file')
+    monkeypatch.setattr('hireme.document_downloads._read_pdf_bytes',forbidden)
+    with pytest.raises(ValueError,match='changed'): selected_pdf(store,'resume','a'*64)
+    with pytest.raises(ValueError,match='No selected'): selected_pdf(store,'transcript','a'*64)
+    with pytest.raises(ValueError): selected_pdf(store,'cover_letter','a'*64)
+
+
+def test_selected_pdf_rechecks_selection_after_capturing_bytes(store,monkeypatch):
+    from hireme import document_downloads
+    doc=dict(store.db.execute("SELECT * FROM documents WHERE kind='resume'").fetchone())
+    read=document_downloads._read_pdf_bytes
+    def changing(path):
+        data=read(path)
+        store.db.execute("DELETE FROM documents WHERE kind='resume'")
+        return data
+    monkeypatch.setattr(document_downloads,'_read_pdf_bytes',changing)
+    with pytest.raises(ValueError,match='selected PDF changed'): document_downloads.selected_pdf(store,'resume',doc['hash'])
+
+
+def test_selected_pdf_rejects_modified_bytes_and_bad_storage_reference(store):
+    from hireme.document_downloads import selected_pdf
+    doc=dict(store.db.execute("SELECT * FROM documents WHERE kind='resume'").fetchone())
+    path=store.root/'documents'/doc['filename']; path.write_bytes(b'%PDF- changed synthetic file')
+    with pytest.raises(ValueError,match='missing or changed'): selected_pdf(store,'resume',doc['hash'])
+    store.db.execute("UPDATE documents SET filename='../integrations/provider-key.json' WHERE kind='resume'")
+    with pytest.raises(ValueError): selected_pdf(store,'resume',doc['hash'])
