@@ -2770,20 +2770,28 @@ $("#material-upload-form").onsubmit = async (event) => {
   if (file.size > 20 * 1024 * 1024)
     return note("Choose a file up to 20 MiB.", true);
   button.disabled = true;
+  form.elements.file.disabled = true;
+  form.elements.kind.disabled = true;
   try {
-    await api("/api/material-upload", file, true, {
+    const result = await api("/api/material-upload", file, true, {
       "X-Upload-Name": encodeURIComponent(file.name),
       "X-Material-Kind": form.elements.kind.value,
     });
     form.reset();
     await refresh();
     note(
-      "Source uploaded. Review the excerpt and choose how the model can use it.",
+      result.repaired
+        ? "Original source file restored from your matching upload. Existing excerpt reviews and application evidence are preserved."
+        : result.existing
+          ? "This source is already saved. Its reviewed excerpt and approval are unchanged."
+          : "Source uploaded. Review the excerpt and choose how the model can use it.",
     );
   } catch (error) {
     note(error.message, true);
   } finally {
     button.disabled = false;
+    form.elements.file.disabled = false;
+    form.elements.kind.disabled = false;
   }
 };
 

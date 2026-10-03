@@ -895,7 +895,20 @@ def test_material_upload_review_and_context_preferences(tmp_path):
             expect(page.locator('#notice')).to_contain_text('Source unchanged')
             store=Store(root)
             assert store.db.execute('SELECT revision FROM materials').fetchone()[0]==revision
+            source=dict(store.db.execute('SELECT * FROM materials').fetchone())
+            stored=store.root/'materials'/source['filename']; stored.write_bytes(b'Synthetic damaged original')
             store.close()
+            page.locator('#material-upload-form input[type=file]').set_input_files({'name':'research-notes.txt','mimeType':'text/plain','buffer':b'I built Python services for an operational workflow and tested their behavior.'})
+            page.locator('#material-upload-form button').click()
+            expect(page.locator('#notice')).to_contain_text('Original source file restored')
+            store=Store(root)
+            assert dict(store.db.execute('SELECT * FROM materials').fetchone())==source
+            assert stored.read_bytes()==b'I built Python services for an operational workflow and tested their behavior.'
+            store.close()
+            page.locator('#material-upload-form input[type=file]').set_input_files({'name':'research-notes.txt','mimeType':'text/plain','buffer':b'I built Python services for an operational workflow and tested their behavior.'})
+            page.locator('#material-upload-form button').click()
+            expect(page.locator('#notice')).to_contain_text('This source is already saved')
+            expect(page.locator('#material-upload-form input[type=file]')).to_be_enabled()
             page.screenshot(path='/tmp/hireme-materials-desktop.png',full_page=True)
             page.set_viewport_size({'width':390,'height':844});page.screenshot(path='/tmp/hireme-materials-mobile.png',full_page=True)
             assert page.evaluate('document.documentElement.scrollWidth<=window.innerWidth')

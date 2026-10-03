@@ -10,7 +10,7 @@ import zipfile
 from pathlib import Path
 from xml.etree import ElementTree as ET
 
-from .util import digest, now, private_dir,write_private_blob
+from .util import digest, now, private_dir,restore_imported_blob
 
 KINDS = {'writing_sample', 'cover_letter', 'context'}
 ROLES = {'personal', 'style', 'reference'}
@@ -111,17 +111,20 @@ def import_material(store, data: bytes, filename: str, kind: str):
     text = extract_text(data, suffix)
     h = hashlib.sha256(data).hexdigest()
     dest = private_dir(store.root / 'materials') / (h + suffix)
-    write_private_blob(dest,data)
-    # Re-importing the same source/kind is idempotent and does not re-approve edits.
-    previous = store.db.execute('SELECT id FROM materials WHERE hash=? AND kind=?', (h, kind)).fetchone()
-    if previous:
-        return dict(store.db.execute('SELECT * FROM materials WHERE id=?', (previous[0],)).fetchone())
-    mid = uuid.uuid4().hex
     with store.transaction():
+        # The lookup and insert share a transaction, so concurrent imports cannot
+        # create duplicate sources or overwrite a reviewed excerpt.
+        previous = store.db.execute('SELECT id FROM materials WHERE hash=? AND kind=?', (h, kind)).fetchone()
+        missing = not dest.exists()
+        repaired = restore_imported_blob(dest, data) or bool(previous and missing)
+        if repaired: store.event('material_repaired', h, {'kind': kind, 'hash': h})
+        if previous:
+            return {**dict(store.db.execute('SELECT * FROM materials WHERE id=?', (previous[0],)).fetchone()), 'existing': True, 'repaired': repaired}
+        mid = uuid.uuid4().hex
         store.db.execute('INSERT INTO materials VALUES(?,?,?,?,?,?,?,0,?,1,?,?)',
                          (mid, h, dest.name, name, suffix, kind, text, 'reference', now(), now()))
         store.event('material_imported', mid, {'kind': kind, 'hash': h})
-    return dict(store.db.execute('SELECT * FROM materials WHERE id=?', (mid,)).fetchone())
+    return {**dict(store.db.execute('SELECT * FROM materials WHERE id=?', (mid,)).fetchone()), 'existing': False, 'repaired': repaired}
 
 
 def review_material(store, mid: str, text: str, role: str, confirmed: bool):

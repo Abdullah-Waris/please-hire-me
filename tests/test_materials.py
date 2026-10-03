@@ -141,3 +141,71 @@ def test_source_library_stale_page_clamps_to_last_nonempty_page(store):
     store.db.execute('DELETE FROM materials')
     empty = store.snapshot(20)
     assert empty['material_offset'] == 0 and empty['materials'] == []
+
+
+@pytest.mark.parametrize('damage', ['missing', 'corrupt', 'unreadable', 'permissive'])
+@pytest.mark.parametrize('state', ['prepared', 'unknown'])
+def test_matching_source_upload_restores_original_without_changing_review_or_drafts(store, job, package, damage, state):
+    body=b'I built a Python service that supports my team.'
+    source=import_material(store,body,'work.txt','context')
+    review_material(store,source['id'],source['text']+' I tested it thoroughly.','personal',True)
+    draft=store.prepare(job,package)
+    if state=='unknown': store.begin_submit(draft); store.finish(draft,'unknown')
+    row=dict(store.db.execute('SELECT * FROM materials WHERE id=?',(source['id'],)).fetchone())
+    app=dict(store.db.execute('SELECT * FROM applications WHERE id=?',(draft,)).fetchone())
+    templates=store.templates()
+    stored=store.root/'materials'/source['filename']
+    if damage=='missing': stored.unlink()
+    elif damage=='corrupt': stored.write_bytes(b'Synthetic corrupt source')
+    elif damage=='unreadable': stored.chmod(0)
+    else: stored.chmod(0o644)
+    result=import_material(store,body,'renamed-original.txt','context')
+    assert result['existing'] and result['repaired']
+    assert stored.read_bytes()==body and stored.stat().st_mode & 0o777==0o600
+    assert dict(store.db.execute('SELECT * FROM materials WHERE id=?',(source['id'],)).fetchone())==row
+    assert dict(store.db.execute('SELECT * FROM applications WHERE id=?',(draft,)).fetchone())==app
+    assert store.templates()==templates
+    from hireme.backup import create_backup
+    create_backup(store,store.root.parent/'repaired-sources.zip')
+
+
+def test_reimport_of_valid_source_is_idempotent_and_different_bytes_do_not_repair_it(store):
+    body=b'Synthetic original source long enough to be reviewed.'
+    source=import_material(store,body,'original.txt','context')
+    changes=store.db.total_changes
+    result=import_material(store,body,'renamed.txt','context')
+    assert result['existing'] and not result['repaired'] and store.db.total_changes==changes
+    stored=store.root/'materials'/source['filename']; stored.write_bytes(b'Corrupt synthetic source')
+    other=import_material(store,body+b' Changed original bytes.','original.txt','context')
+    assert other['id']!=source['id'] and not other['existing']
+    assert stored.read_bytes()==b'Corrupt synthetic source'
+
+
+def test_source_import_does_not_restore_linked_storage_or_nonregular_files(store,tmp_path):
+    body=b'Synthetic source content long enough to be reviewed.'
+    source=import_material(store,body,'original.txt','context')
+    stored=store.root/'materials'/source['filename']; stored.unlink()
+    outside=tmp_path/'outside.txt'; outside.write_bytes(b'Outside synthetic content')
+    stored.symlink_to(outside)
+    with pytest.raises(ValueError,match='Unsafe'): import_material(store,body,'original.txt','context')
+    assert outside.read_bytes()==b'Outside synthetic content'
+    stored.unlink(); stored.mkdir()
+    with pytest.raises(ValueError): import_material(store,body,'original.txt','context')
+
+
+def test_concurrent_matching_source_imports_share_one_reviewable_record(store):
+    from concurrent.futures import ThreadPoolExecutor
+    import threading
+    from hireme.store import Store
+    barrier=threading.Barrier(2)
+    def upload():
+        local=Store(store.root)
+        try:
+            barrier.wait(timeout=5)
+            return import_material(local,b'Synthetic matching upload shared by two requests.','original.txt','context')['id']
+        finally: local.close()
+    with ThreadPoolExecutor(max_workers=2) as executor:
+        results=list(executor.map(lambda _: upload(),range(2)))
+    assert results[0]==results[1]
+    assert store.db.execute('SELECT COUNT(*) FROM materials').fetchone()[0]==1
+    assert store.db.execute("SELECT COUNT(*) FROM events WHERE kind='material_imported'").fetchone()[0]==1
