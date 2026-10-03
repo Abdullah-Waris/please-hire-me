@@ -2306,3 +2306,89 @@ def test_preferences_savebar_discards_locally_and_warns_before_losing_drafts(sto
             assert dialogs==['beforeunload','beforeunload'] and not errors
             browser.close()
     finally:process.terminate();process.join(5)
+
+
+@pytest.mark.parametrize('failed_page',[False,True])
+def test_source_page_load_queues_followup_saves_and_preserves_other_section_focus(store,failed_page):
+    from hireme.materials import import_material
+    from playwright.sync_api import sync_playwright,expect
+    for i in range(25):import_material(store,f'Synthetic queued source {i} with enough text for review.'.encode(),f'queued-{i}.txt','context')
+    sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port));process.start()
+    base=f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try:urllib.request.urlopen(base).close();break
+            except OSError:time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch();page=browser.new_page(viewport={'width':390,'height':844})
+            pending=[];reads=[];errors=[]
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.on('request',lambda request:reads.append(request.url) if request.url==base+'/api/state?material_offset=20' else None)
+            page.goto(base+'/#token=fixture-capability');page.locator('[data-view=materials]').click()
+            expect(page.locator('#material-list article')).to_have_count(20)
+            stale=page.request.get(base+'/api/state?material_offset=20',headers={'X-Hireme-Token':'fixture-capability'}).json()
+            page.route('**/api/state?material_offset=20',lambda route:pending.append(route),times=1)
+            with page.expect_request('**/api/state?material_offset=20'):page.get_by_role('button',name='Older sources',exact=True).click()
+            page.wait_for_function('()=>materialPagingBusy')
+            page.evaluate('()=>{window.refreshesFinished=0;refresh().then(()=>refreshesFinished++);refresh().then(()=>refreshesFinished++)}')
+            page.locator('[data-view=settings]').click()
+            score=page.locator('#settings-form [name=min_fit_score]');score.fill('57')
+            with page.expect_response('**/api/settings'):page.get_by_role('button',name='Save preferences',exact=True).click()
+            expect(page.locator('#settings-form')).to_have_attribute('data-saving','true')
+            expect(score).to_be_disabled()
+            assert store.settings()['min_fit_score']==57 and page.evaluate('refreshesFinished')==0
+            page.locator('[data-view=profile]').click()
+            draft=page.locator('#facts-form [name=first_name]');draft.fill('Independent unsaved name')
+            if failed_page:pending.pop().fulfill(status=503,json={'error':'Synthetic interrupted source page'})
+            else:pending.pop().fulfill(json=stale)
+            expect(page.locator('#settings-form')).not_to_have_attribute('data-saving','true')
+            page.wait_for_function('()=>refreshesFinished===2')
+            expect(draft).to_have_value('Independent unsaved name');expect(draft).to_be_focused()
+            expect(page.locator('#material-list article')).to_have_count(20 if failed_page else 5)
+            assert page.evaluate('state.settings.min_fit_score')==57 and len(reads)==(1 if failed_page else 2)
+            page.locator('[data-view=settings]').click();expect(score).to_have_value('57');expect(score).to_be_enabled()
+            assert not errors and store.facts()['first_name']['value']=='Test'
+            browser.close()
+    finally:process.terminate();process.join(5)
+
+
+@pytest.mark.parametrize('operation',['save','open'])
+@pytest.mark.parametrize('fails',[False,True])
+def test_saved_view_requests_release_queued_preference_refresh_on_success_or_failure(store,operation,fails):
+    from hireme.saved_views import change_view
+    from playwright.sync_api import sync_playwright,expect
+    change_view(store,{'action':'save','name':'Existing synthetic view','search':'Python','status':'all','sort':'recent'})
+    sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port));process.start()
+    base=f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try:urllib.request.urlopen(base).close();break
+            except OSError:time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch();page=browser.new_page(viewport={'width':390,'height':844})
+            pending=[];errors=[];page.on('pageerror',lambda error:errors.append(str(error)))
+            page.goto(base+'/#token=fixture-capability')
+            page.wait_for_function('()=>!refreshing && ledgerState!==null')
+            page.locator('#saved-views-panel summary').click()
+            pattern='**/api/saved-view' if operation=='save' else '**/api/jobs?*'
+            page.route(pattern,lambda route:pending.append(route),times=1)
+            if operation=='save':
+                page.locator('#saved-view-form input').fill('Another synthetic view')
+                with page.expect_request(pattern):page.locator('#saved-view-form button').click()
+            else:
+                with page.expect_request(pattern):page.get_by_role('button',name='Open view: Existing synthetic view',exact=True).click()
+            page.locator('[data-view=settings]').click()
+            score=page.locator('#settings-form [name=min_fit_score]');score.fill('59')
+            with page.expect_response('**/api/settings'):page.get_by_role('button',name='Save preferences',exact=True).click()
+            expect(page.locator('#settings-form')).to_have_attribute('data-saving','true')
+            if fails:pending.pop().fulfill(status=503,json={'error':'Synthetic view interruption'})
+            else:pending.pop().continue_()
+            expect(page.locator('#settings-form')).not_to_have_attribute('data-saving','true')
+            expect(score).to_have_value('59');expect(score).to_be_enabled()
+            assert page.evaluate('state.settings.min_fit_score')==59 and store.settings()['min_fit_score']==59
+            assert not page.evaluate('savedViewBusy || deferredRefresh!==null') and not errors
+            assert not store.db.execute('SELECT * FROM model_requests').fetchone()
+            browser.close()
+    finally:process.terminate();process.join(5)

@@ -36,7 +36,7 @@ This audit separates implemented software, fixture evidence, and the remaining l
 - Read-only demo data is disposable and isolated from personal storage. Authenticated CSV exports include the full opportunity ledger and neutralize spreadsheet formula prefixes, while excluding answer packages and documents.
 - Full-ledger totals are verified beyond the auxiliary 500-row snapshot cap and across 23-hour/25-hour local days. Quiet eligibility decisions remain recorded without inflating the attention queue. Exact diagnostic reasons remain available.
 - Form regressions cover unsaved drafts, optional-field toggles, provider-specific controls, malformed JSON feedback, and connection recovery. Local setup diagnostics and port-error messages have coverage.
-- **542 full-suite tests passed** on macOS ARM64 / Python 3.14 in 114.23 seconds. Coverage includes private history downloads, full-ledger pagination, source revocation, paused crash recovery, connection switching, saved-answer withdrawal, scheduler ownership, company boundaries and alias-resistant attempt history. The five PyMuPDF deprecation warnings remain third-party warnings.
+- **548 full-suite tests passed** on macOS ARM64 / Python 3.14 in 118.57 seconds. Coverage includes private history downloads, full-ledger pagination, source revocation, paused crash recovery, connection switching, saved-answer withdrawal, scheduler ownership, company boundaries and alias-resistant attempt history. The five PyMuPDF deprecation warnings remain third-party warnings.
 - Preferences show installed and saved schedule intervals separately. Applying an interval preserves paused submissions, protects another applicant’s existing schedule (including disabled systemd timers), and activates only the worker timer when updating a Pi schedule. Tests substitute OS-service calls and do not install a real personal schedule.
 - Opportunity details can remove a company exclusion and its current aliases without changing any job, question or application record, resuming submissions or clearing uncertainty/company limits. Mobile fixtures cover failure/retry and exclusion reversal; the inclusion dialog passes automated accessibility and overflow checks at 320px, 390px and 1440px.
 - Opportunity details can skip a company and its configured aliases. That action removes only unattempted drafts and unneeded future questions; submitting/confirmed/uncertain/email-verification evidence remains unchanged. Pending preference drafts must be saved first, and errors stay visible inside the dialog.
@@ -170,3 +170,11 @@ A sticky preferences action bar keeps save/discard controls reachable through th
 The synthetic browser fixture verifies 320/390/1440-pixel visibility, keyboard focus above the bar, cancelled reloads for both forms, malformed alias discard without POST requests, unchanged saved settings after discard and clean reload after saving. The responsive accessibility audit reported no selected violations or horizontal overflow; a separate keyboard traversal checked every preference control at 320 pixels.
 
 All 542 full-suite tests passed after the preference actions and leave-page protection changes.
+
+### Refreshes after overlapping local actions
+
+Source paging and saved-view operations now retain a shared deferred refresh instead of dropping refresh requests while busy. Finishing either operation, successfully or with an error, releases one fresh read for all queued callers. A concurrent preference save stays protected until that read completes. Source paging scopes focus restoration to its originating section and leaves another editor’s focus intact.
+
+Six controlled-response browser cases cover source-page success/failure, saved-view save/open success/failure, a stale source snapshot captured before a preference write, coalesced refresh callers, editable controls after completion and an independent unsaved fact draft. Existing source navigation and saved-view regressions also pass. No worker or model requests are added.
+
+All 548 full-suite tests passed after the deferred-refresh and source-focus changes.

@@ -988,6 +988,7 @@ async function changeSavedView(data, name, button) {
     savedViewFeedback(error.message, true);
   } finally {
     savedViewBusy = false;
+    releaseDeferredRefresh();
     renderSavedViews();
     if (focused && document.activeElement === document.body) {
       const replacement = [
@@ -1034,6 +1035,7 @@ async function openSavedView(item, button) {
     }
   } finally {
     savedViewBusy = false;
+    releaseDeferredRefresh();
     renderSavedViews();
     if (
       focused &&
@@ -2898,8 +2900,25 @@ function render() {
   if ($("#source-health-panel").open) loadSourceHealth();
   show(view);
 }
+let deferredRefresh = null;
+function releaseDeferredRefresh() {
+  if (!deferredRefresh || materialPagingBusy || savedViewBusy) return;
+  const waiting = deferredRefresh;
+  deferredRefresh = null;
+  refresh().then(waiting.resolve, waiting.reject);
+}
 async function refresh() {
-  if (materialPagingBusy || savedViewBusy) return;
+  if (materialPagingBusy || savedViewBusy) {
+    if (!deferredRefresh) {
+      let resolve, reject;
+      const promise = new Promise((done, failed) => {
+        resolve = done;
+        reject = failed;
+      });
+      deferredRefresh = { promise, resolve, reject };
+    }
+    return deferredRefresh.promise;
+  }
   if (refreshing) {
     await refreshing;
     return refresh();
@@ -3606,6 +3625,8 @@ async function changeMaterialPage(
   search = materialSearch,
   status = materialStatus,
 ) {
+  const originView = view,
+    originControl = document.activeElement;
   if (refreshing) await refreshing;
   if (materialPagingBusy) return;
   if (materialDrafts())
@@ -3630,10 +3651,18 @@ async function changeMaterialPage(
     materialStatus = result.material_status;
     controls.forEach(([control, disabled]) => (control.disabled = disabled));
     materialPagingBusy = false;
-    document.activeElement.blur();
+    const moveFocus =
+      originView === "materials" &&
+      view === "materials" &&
+      (document.activeElement === document.body ||
+        list.contains(document.activeElement) ||
+        $("#material-filter-form").contains(document.activeElement));
+    if (list.contains(document.activeElement)) document.activeElement.blur();
     render();
-    list.focus();
-    list.scrollIntoView({ block: "start" });
+    if (moveFocus) {
+      list.focus({ preventScroll: true });
+      list.scrollIntoView({ block: "start", behavior: "instant" });
+    }
     return true;
   } catch (error) {
     note(
@@ -3641,9 +3670,17 @@ async function changeMaterialPage(
       true,
     );
     controls.forEach(([control, disabled]) => (control.disabled = disabled));
+    if (
+      originView === view &&
+      document.activeElement === document.body &&
+      originControl?.isConnected &&
+      !originControl.disabled
+    )
+      originControl.focus({ preventScroll: true });
   } finally {
     materialPagingBusy = false;
     list.removeAttribute("aria-busy");
+    releaseDeferredRefresh();
   }
 }
 function updateMaterialWarning(box, source) {
