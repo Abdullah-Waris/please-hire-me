@@ -15,6 +15,12 @@ let backupBusy = false;
 let renderedAccountSignature = null;
 let aliasJsonMode = false;
 let renderedBlockedSignature = null;
+let runHistoryState = null,
+  runHistoryOffset = 0,
+  runHistoryBusy = false,
+  runHistoryRequest = 0,
+  runHistoryTimer,
+  renderedRunHistorySignature = null;
 let outcomeState = null,
   outcomeOffset = 0,
   outcomeBusy = false,
@@ -1652,7 +1658,52 @@ $("#alias-json-toggle").onclick = () => {
     $("#alias-error").hidden = false;
   }
 };
+function runRow(run) {
+  const row = el("div", undefined, "run-row");
+  let detail = run.detail || "No batch details recorded yet.";
+  try {
+    const data = JSON.parse(detail);
+    if (!data || typeof data !== "object" || Array.isArray(data))
+      throw new Error();
+    const outcomes = Object.entries(data.outcomes || {})
+      .filter(([key]) => key !== "confirmed")
+      .map(
+        ([key, value]) =>
+          `${statusLabels[key] || key.replaceAll("_", " ")}: ${value}`,
+      )
+      .join("; ");
+    const reason =
+      data.reason ||
+      Object.entries(data.reasons || {})
+        .map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`)
+        .join("; ");
+    detail =
+      data.mode === "discovery"
+        ? `Opportunity search · ${data.added || 0} new listings${data.sources_checked !== undefined ? ` · ${data.sources_checked} sources checked · ${data.sources_failed || 0} unavailable` : ""} · No submissions.${data.time_limit_reached ? " Search time limit reached." : ""} ${reason}`.trim()
+        : data.mode === "prepare"
+          ? `Preparation batch · ${data.confirmed || 0} prepared · ${data.attempts || 0} attempted · No submissions. ${outcomes} ${reason}`.trim()
+          : `${run.submitted ?? data.confirmed ?? 0} submitted · ${data.attempts || 0} attempted. ${outcomes} ${reason}`.trim();
+  } catch {}
+  if (run.model_requests_used !== undefined)
+    detail += ` · ${run.model_requests_used} model ${run.model_requests_used === 1 ? "request" : "requests"}`;
+  row.append(
+    el("span", date(run.started)),
+    el(
+      "span",
+      {
+        finished: "Finished",
+        running: "Running",
+        paused: "Paused",
+        blocked: "Stopped for a blocker",
+        interrupted: "Interrupted",
+      }[run.status] || run.status.replaceAll("_", " "),
+    ),
+    el("span", detail),
+  );
+  return row;
+}
 function renderRuns() {
+  if ($("#run-history-panel").open) loadRunHistory();
   const parent = $("#runs");
   parent.replaceChildren();
   if (!state.runs.length) {
@@ -1664,36 +1715,89 @@ function renderRuns() {
     );
     return;
   }
-  for (const run of state.runs) {
-    const row = el("div", undefined, "run-row");
-    let detail = run.detail;
-    try {
-      const data = JSON.parse(detail);
-      const outcomes = Object.entries(data.outcomes || {})
-        .filter(([key]) => key !== "confirmed")
-        .map(
-          ([key, value]) =>
-            `${statusLabels[key] || key.replaceAll("_", " ")}: ${value}`,
-        )
-        .join("; ");
-      const reason =
-        data.reason ||
-        Object.entries(data.reasons || {})
-          .map(([key, value]) => `${key.replaceAll("_", " ")}: ${value}`)
-          .join("; ");
-      detail =
-        data.mode === "discovery"
-          ? `Opportunity search · ${data.added || 0} new listings${data.sources_checked !== undefined ? ` · ${data.sources_checked} sources checked · ${data.sources_failed || 0} unavailable` : ""} · No submissions.${data.time_limit_reached ? " Search time limit reached." : ""} ${reason}`.trim()
-          : `${data.confirmed || 0} submitted · ${data.attempts || 0} attempted. ${outcomes} ${reason}`.trim();
-    } catch {}
-    row.append(
-      el("span", date(run.started)),
-      el("span", run.status.replaceAll("_", " ")),
-      el("span", detail),
+  for (const run of state.runs.slice(0, 5)) parent.append(runRow(run));
+}
+
+function updateRunHistoryControls() {
+  $("#run-history-previous").disabled =
+    runHistoryBusy || !runHistoryState || runHistoryState.offset === 0;
+  $("#run-history-next").disabled =
+    runHistoryBusy ||
+    !runHistoryState ||
+    runHistoryState.offset + runHistoryState.limit >= runHistoryState.total;
+  $("#run-history-retry").disabled = runHistoryBusy;
+  $("#run-history-page").textContent = runHistoryState
+    ? runHistoryState.total
+      ? `${runHistoryState.offset + 1}–${Math.min(runHistoryState.offset + runHistoryState.limit, runHistoryState.total)} of ${runHistoryState.total} recorded batches`
+      : "0 recorded batches"
+    : "Loading batch history…";
+}
+async function loadRunHistory(reset = false, focus = false) {
+  if (!state || runHistoryBusy) return;
+  if (reset) runHistoryOffset = 0;
+  runHistoryBusy = true;
+  updateRunHistoryControls();
+  const request = ++runHistoryRequest,
+    parent = $("#run-history");
+  parent.setAttribute("aria-busy", "true");
+  try {
+    const result = await api(
+      `/api/runs?${new URLSearchParams({ search: $("#run-search").value, status: $("#run-filter").value, offset: runHistoryOffset })}`,
     );
-    parent.append(row);
+    if (request !== runHistoryRequest) return;
+    runHistoryState = result;
+    runHistoryOffset = result.offset;
+    const signature = JSON.stringify(result.runs);
+    if (signature !== renderedRunHistorySignature) {
+      parent.replaceChildren();
+      if (!result.runs.length)
+        empty(parent, "No recorded batches match these filters.");
+      for (const run of result.runs) parent.append(runRow(run));
+      renderedRunHistorySignature = signature;
+    }
+    $("#run-history-error").hidden = true;
+    $("#run-history-retry").hidden = true;
+    if (focus) {
+      parent.focus();
+      parent.scrollIntoView({ block: "start", behavior: "auto" });
+    }
+  } catch (error) {
+    $("#run-history-error").textContent =
+      `Could not load batch history: ${error.message}`;
+    $("#run-history-error").hidden = false;
+    $("#run-history-retry").hidden = false;
+  } finally {
+    runHistoryBusy = false;
+    parent.removeAttribute("aria-busy");
+    updateRunHistoryControls();
+    if (request !== runHistoryRequest) loadRunHistory(true);
   }
 }
+$("#run-history-panel").ontoggle = () => {
+  if ($("#run-history-panel").open) loadRunHistory();
+};
+$("#run-search").addEventListener("input", () => {
+  clearTimeout(runHistoryTimer);
+  runHistoryRequest++;
+  runHistoryTimer = setTimeout(() => loadRunHistory(true), 220);
+});
+$("#run-filter").onchange = () => {
+  runHistoryRequest++;
+  loadRunHistory(true);
+};
+$("#run-history-previous").onclick = () => {
+  runHistoryOffset = Math.max(
+    0,
+    runHistoryOffset - (runHistoryState?.limit || 25),
+  );
+  loadRunHistory(false, true);
+};
+$("#run-history-next").onclick = () => {
+  runHistoryOffset += runHistoryState?.limit || 25;
+  loadRunHistory(false, true);
+};
+$("#run-history-retry").onclick = () => loadRunHistory(true);
+
 function render() {
   const dayFormatter = new Intl.DateTimeFormat("en-CA", {
     timeZone: state.settings.timezone,

@@ -312,6 +312,56 @@ def test_model_request_budget_counts_all_providers_without_replacing_connection_
     finally: process.terminate(); process.join(5)
 
 
+def test_complete_batch_history_pages_searches_old_notes_and_retries(store):
+    for index in range(61):
+        store.db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?)',
+                         (f'run-{index:03}', '2026-10-03T12:00:00+00:00', None, 'finished', 0,
+                          json.dumps({'mode': 'prepare', 'confirmed': 2, 'attempts': 2}) if index == 0 else '{}'))
+    store.db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?)',
+                     ('old-blocked', '2000-01-01T00:00:00+00:00', None, 'blocked', 0, json.dumps({'reason': 'Café 100%_ synthetic blocker'})))
+    store.db.execute('INSERT INTO model_requests(timestamp,run_id,provider) VALUES(?,?,?)',
+                     ('2000-01-01T00:00:00+00:00', 'old-blocked', 'claude-cli'))
+    from playwright.sync_api import sync_playwright, expect
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 320, 'height': 844}); errors = []; history_requests = []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.on('request', lambda request: history_requests.append(request.url) if '/api/runs' in request.url else None)
+            page.goto(base + '/#token=fixture-capability')
+            expect(page.locator('#runs .run-row')).to_have_count(5)
+            expect(page.locator('#runs')).to_contain_text('Preparation batch · 2 prepared')
+            expect(page.locator('#runs')).not_to_contain_text('2 submitted')
+            assert not history_requests
+            assert page.request.get(base + '/api/runs').status == 403
+            page.locator('#run-history-panel > summary').click()
+            expect(page.locator('#run-history .run-row')).to_have_count(25)
+            expect(page.locator('#run-history-page')).to_contain_text('1–25 of 62')
+            page.locator('#run-history-next').click(); expect(page.locator('#run-history-page')).to_contain_text('26–50 of 62')
+            expect(page.locator('#run-history')).to_be_focused()
+            page.locator('#run-history-next').click(); expect(page.locator('#run-history-page')).to_contain_text('51–62 of 62')
+            expect(page.locator('#run-history')).to_contain_text('Café 100%_ synthetic blocker')
+            expect(page.locator('#run-history')).to_contain_text('1 model request')
+            page.route('**/api/runs*', lambda route: route.fulfill(status=503, json={'error': 'Synthetic history unavailable'}))
+            page.locator('#run-search').fill('CAFÉ 100%_')
+            expect(page.locator('#run-history-error')).to_contain_text('Synthetic history unavailable')
+            page.unroute('**/api/runs*'); page.locator('#run-history-retry').click()
+            expect(page.locator('#run-history .run-row')).to_have_count(1)
+            expect(page.locator('#run-history-page')).to_contain_text('1–1 of 1')
+            page.locator('#run-filter').select_option('finished')
+            expect(page.locator('#run-history-page')).to_contain_text('0 recorded batches')
+            page.locator('#run-search').fill('')
+            expect(page.locator('#run-history-page')).to_contain_text('of 61')
+            assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            browser.close()
+    finally: process.terminate(); process.join(5)
+
+
 def test_dashboard_capability_csrf_host_and_xss(tmp_path):
     sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
     process=multiprocessing.Process(target=launch,args=(str(tmp_path/'private'),str(Path(__file__).parent.parent),port))

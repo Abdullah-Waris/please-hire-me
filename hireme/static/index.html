@@ -338,6 +338,68 @@
             <span class="help">Your worker’s activity</span>
           </div>
           <div id="runs"></div>
+          <details id="run-history-panel" class="section">
+            <summary>Search complete batch history</summary>
+            <div class="form-grid">
+              <label
+                >Show batches<select id="run-filter">
+                  <option value="all">All recorded batches</option>
+                  <option value="running">Running</option>
+                  <option value="finished">Finished</option>
+                  <option value="paused">Paused</option>
+                  <option value="blocked">Stopped for a blocker</option>
+                  <option value="interrupted">Interrupted</option>
+                </select></label
+              >
+              <label
+                >Search recorded notes<input
+                  id="run-search"
+                  type="search"
+                  maxlength="200"
+                  autocomplete="off"
+              /></label>
+            </div>
+            <p id="run-history-error" class="help" role="alert" hidden></p>
+            <button
+              id="run-history-retry"
+              type="button"
+              class="secondary"
+              hidden
+            >
+              Retry batch history
+            </button>
+            <div
+              id="run-history"
+              tabindex="-1"
+              role="region"
+              aria-label="Complete batch history"
+            ></div>
+            <div class="ledger-pagination">
+              <span
+                id="run-history-page"
+                class="help"
+                role="status"
+                aria-live="polite"
+              ></span>
+              <div class="actions">
+                <button
+                  id="run-history-previous"
+                  type="button"
+                  class="secondary"
+                  disabled
+                >
+                  Newer batches</button
+                ><button
+                  id="run-history-next"
+                  type="button"
+                  class="secondary"
+                  disabled
+                >
+                  Older batches
+                </button>
+              </div>
+            </div>
+          </details>
           <details class="section">
             <summary>Discovery source health</summary>
             <div id="sources"></div>
