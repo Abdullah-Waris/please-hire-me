@@ -68,13 +68,13 @@ const expandedEvidence = new Set(),
   evidenceImages = new Map();
 document.addEventListener("input", (event) => {
   if (event.target.form) dirtyForms.add(event.target.form);
-  if (event.target.form?.id === "settings-form")
-    updatePreferenceDraftControls();
+  if (["settings-form", "facts-form"].includes(event.target.form?.id))
+    updateDraftControls();
 });
 document.addEventListener("change", (event) => {
   if (event.target.form) dirtyForms.add(event.target.form);
-  if (event.target.form?.id === "settings-form")
-    updatePreferenceDraftControls();
+  if (["settings-form", "facts-form"].includes(event.target.form?.id))
+    updateDraftControls();
 });
 function editing(selector) {
   const form = $(selector);
@@ -84,13 +84,18 @@ function editing(selector) {
     dirtyForms.has(form)
   );
 }
-function updatePreferenceDraftControls() {
-  const form = $("#settings-form");
-  $("#discard-preferences").disabled =
-    !state ||
-    state.demo ||
-    form.dataset.saving === "true" ||
-    !dirtyForms.has(form);
+function updateDraftControls() {
+  for (const [formId, buttonId] of [
+    ["settings-form", "discard-preferences"],
+    ["facts-form", "discard-fact-edits"],
+  ]) {
+    const form = $("#" + formId);
+    $("#" + buttonId).disabled =
+      !state ||
+      state.demo ||
+      form.dataset.saving === "true" ||
+      !dirtyForms.has(form);
+  }
 }
 window.addEventListener("beforeunload", (event) => {
   const unfinished = [$("#facts-form"), $("#settings-form")].some(
@@ -106,7 +111,7 @@ function blurForm(form) {
 function saved(form) {
   if (!form) return;
   dirtyForms.delete(form);
-  if (form.id === "settings-form") updatePreferenceDraftControls();
+  if (["settings-form", "facts-form"].includes(form.id)) updateDraftControls();
   if (form.id) {
     const indicator = document.querySelector(`[data-draft-for="${form.id}"]`);
     if (indicator) indicator.textContent = "";
@@ -2385,7 +2390,7 @@ function renderSettings() {
             : v;
   }
   renderAliasRows(state.settings.company_aliases);
-  updatePreferenceDraftControls();
+  updateDraftControls();
 }
 
 function addAliasRow(other = "", main = "", focus = false) {
@@ -2895,7 +2900,7 @@ function render() {
   renderDocumentStatus();
   if (!editing("#facts-form")) renderFacts();
   if (!editing("#settings-form")) renderSettings();
-  updatePreferenceDraftControls();
+  updateDraftControls();
   renderRuns();
   if ($("#source-health-panel").open) loadSourceHealth();
   show(view);
@@ -2961,6 +2966,18 @@ $("#add-posting").onclick = () => {
       : "smooth",
   });
   $("#job-form [name=company]").focus({ preventScroll: true });
+};
+$("#discard-fact-edits").onclick = () => {
+  const form = $("#facts-form");
+  if (!state || state.demo || form.dataset.saving === "true") return;
+  saved(form);
+  $("#confirm-facts").checked = false;
+  renderFacts();
+  updateDraftControls();
+  form.querySelector('button[type="submit"]').focus({ preventScroll: true });
+  note(
+    "Unsaved fact edits discarded. Saved facts and extracted proposals are unchanged.",
+  );
 };
 $("#facts-form").onsubmit = async (e) => {
   e.preventDefault();

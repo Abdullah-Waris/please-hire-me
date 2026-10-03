@@ -2,6 +2,10 @@
 
 A job application desk that runs on your computer—or a Raspberry Pi—and works from **your confirmed facts and your writing**. Discover opportunities, filter them against your preferences, fill supported applications, and keep a durable record of what submitted, what needs you, and what remains uncertain.
 
+![Application desk: local navigation, daily progress and the opportunity ledger](docs/images/application-desk-demo.png)
+
+*Read-only demo with invented companies and application records. [Try the sample workspace](#try-a-sample-workspace) without importing personal information.*
+
 This project began as a fork of [alecswang/please-hire-me](https://github.com/alecswang/please-hire-me). The original automation and discovery work provided the starting point. This fork grew from trying to make that workflow usable day after day: watching applications fail, distinguishing missing facts from poor context matching, and replacing fragile retries with a private ledger and explicit controls. The original MIT license and attribution remain.
 
 ## What changed
@@ -19,10 +23,12 @@ This is a personal automation tool, not a hosted multi-tenant service. Each pers
 
 ## Get started
 
+The current workspace improvements are on the **codex/application-workspace** branch of this fork.
+
 Requires **Python 3.11+**, Git, and macOS or Linux. On Windows use a supported Linux environment such as WSL2; the worker uses POSIX file locks. Model inference runs remotely through your selected provider, not on a local GPU.
 
 ```bash
-git clone https://github.com/hoverdart/please-hire-me.git
+git clone --branch codex/application-workspace https://github.com/Abdullah-Waris/please-hire-me.git
 cd please-hire-me
 ./setup.sh
 ```
@@ -68,6 +74,17 @@ Want to look around first? After installing dependencies, run:
 Open the printed URL. This creates a temporary, read-only workspace with invented companies and application records. It does not load your personal ledger, connect a model, send applications, or save changes. Close it with **Ctrl+C**; the sample data is removed. The default preview port is 8767, separate from your regular dashboard.
 
 ### Your application workspace
+
+| I want to… | Open… |
+| --- | --- |
+| See progress or inspect a recorded application | **Overview** → an opportunity’s **Answers & evidence** |
+| Answer a question or review an uncertain outcome | **Needs you** |
+| Update my resume and confirmed information | **Your facts** |
+| Add a writing example or project context | **Writing & context** |
+| Change search targets, limits or timing | **Preferences** |
+| Find a tool by what it does | **Find a tool**, or **Ctrl/⌘ K** |
+
+Preferences keeps **Save preferences** and **Discard changes** within reach as you scroll. **Discard fact edits** in Your facts restores saved facts and extracted proposals without confirming or deleting them. These discard actions affect only unsaved edits in their own form. Unsaved facts or preferences prompt the browser’s usual leave-page warning when supported; moving between workspace sections keeps drafts in place. Draft text is not written to browser storage, so choosing to leave still discards it. While a save is pending, that form stays temporarily disabled and other sections remain usable.
 
 Choose **Find a tool** at the top of any section, or press **Ctrl/⌘ K**, to search the workspace by task. Try resume, backup, passwords or questions. Common tasks appear first; typed searches include all sections and tools. Use Tab or the arrow keys to browse and Enter to open. Escape returns to the control you were using. A result opens its section and any containing panels; it does not activate uploads, models, schedules or submission actions. Your unsaved form edits stay in place, and tool-search text stays in the page rather than being sent to a model or stored in browser storage.
 

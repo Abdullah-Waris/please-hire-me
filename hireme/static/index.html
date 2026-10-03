@@ -932,8 +932,16 @@
                 ><input type="checkbox" id="confirm-facts" required /> I confirm
                 these values are accurate. Blank fields remain unknown. Clearing
                 a saved optional value stops its reuse.</label
-              ><button type="submit">Save confirmed facts</button
-              ><span
+              ><button type="submit">Save confirmed facts</button>
+              <button
+                type="button"
+                id="discard-fact-edits"
+                class="secondary"
+                disabled
+              >
+                Discard fact edits
+              </button>
+              <span
                 class="draft-status"
                 data-draft-for="facts-form"
                 role="status"

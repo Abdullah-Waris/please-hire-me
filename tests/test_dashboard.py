@@ -964,7 +964,7 @@ def test_fresh_user_guided_setup_saves_paused_and_provider_key_private(tmp_path)
             page.locator('#setup-next').click();expect(page.locator('#guided-label')).to_contain_text('Step 2')
             values={'full_name':'Example Candidate','first_name':'Example','last_name':'Candidate','email':'candidate@synthetic.invalid','phone':'5551234567','location':'Berkeley, CA','graduation':'2028-05','work_authorized_us':'Yes','needs_sponsorship':'No','us_person':'Yes','professional_years':'0','skills':'Python'}
             for key,value in values.items():page.locator('#facts-form [name="'+key+'"]').fill(value)
-            page.locator('#confirm-facts').check();page.locator('#facts-form button').click();expect(page.locator('#notice')).to_contain_text('Confirmed facts saved')
+            page.locator('#confirm-facts').check();page.locator('#facts-form').get_by_role('button',name='Save confirmed facts',exact=True).click();expect(page.locator('#notice')).to_contain_text('Confirmed facts saved')
             page.locator('#setup-next').click();expect(page.locator('#guided-label')).to_contain_text('Step 3')
             page.locator('#context-form textarea').fill('I built a Python tool that helps students organize their coursework.')
             page.locator('#context-form input[type=checkbox]').check();page.locator('#context-form button').click();expect(page.locator('#notice')).to_contain_text('Approved context saved')
@@ -2390,5 +2390,44 @@ def test_saved_view_requests_release_queued_preference_refresh_on_success_or_fai
             assert page.evaluate('state.settings.min_fit_score')==59 and store.settings()['min_fit_score']==59
             assert not page.evaluate('savedViewBusy || deferredRefresh!==null') and not errors
             assert not store.db.execute('SELECT * FROM model_requests').fetchone()
+            browser.close()
+    finally:process.terminate();process.join(5)
+
+
+def test_discard_fact_edits_restores_confirmed_values_and_unconfirmed_proposals_without_writes(store):
+    from playwright.sync_api import sync_playwright,expect
+    store.put_facts({'preferred_name':'Synthetic extracted nickname'},source='resume',confirmed=False)
+    before=store.snapshot()
+    sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port));process.start()
+    base=f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try:urllib.request.urlopen(base).close();break
+            except OSError:time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch();page=browser.new_page(viewport={'width':320,'height':844})
+            posts=[];errors=[]
+            page.on('request',lambda request:posts.append(request.url) if request.method=='POST' else None)
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.goto(base+'/#token=fixture-capability');page.locator('[data-view=settings]').click()
+            preference=page.locator('#settings-form [name=locations]');preference.fill('Separate unsaved location')
+            page.locator('[data-view=profile]').click();page.locator('#show-optional-facts').check()
+            discard=page.locator('#discard-fact-edits');expect(discard).to_be_disabled()
+            first=page.locator('#facts-form [name=first_name]');nickname=page.locator('#facts-form [name=preferred_name]')
+            first.fill('');nickname.fill('Unsaved edited nickname');page.locator('#confirm-facts').check()
+            expect(discard).to_be_enabled();discard.click()
+            expect(first).to_have_value('Test');expect(nickname).to_have_value('Synthetic extracted nickname')
+            expect(nickname.locator('..')).to_contain_text('Extracted from resume — please confirm')
+            expect(page.locator('#confirm-facts')).not_to_be_checked();expect(page.locator('#show-optional-facts')).to_be_checked()
+            expect(page.get_by_role('button',name='Save confirmed facts',exact=True)).to_be_focused()
+            expect(page.locator('[data-draft-for=facts-form]')).to_be_empty();expect(discard).to_be_disabled()
+            assert page.evaluate("()=>{const e=new Event('beforeunload',{cancelable:true});window.dispatchEvent(e);return e.defaultPrevented}")
+            page.evaluate('refresh()');expect(nickname).to_have_value('Synthetic extracted nickname')
+            page.locator('[data-view=settings]').click();expect(preference).to_have_value('Separate unsaved location')
+            page.locator('#discard-preferences').click()
+            assert not page.evaluate("()=>{const e=new Event('beforeunload',{cancelable:true});window.dispatchEvent(e);return e.defaultPrevented}")
+            assert not posts and store.snapshot()==before and not errors
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             browser.close()
     finally:process.terminate();process.join(5)

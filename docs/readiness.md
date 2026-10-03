@@ -178,3 +178,9 @@ Source paging and saved-view operations now retain a shared deferred refresh ins
 Six controlled-response browser cases cover source-page success/failure, saved-view save/open success/failure, a stale source snapshot captured before a preference write, coalesced refresh callers, editable controls after completion and an independent unsaved fact draft. Existing source navigation and saved-view regressions also pass. No worker or model requests are added.
 
 All 548 full-suite tests passed after the deferred-refresh and source-focus changes.
+
+### Discarding unsaved fact edits
+
+Your facts can restore its last loaded values locally, including unconfirmed resume proposals, without writing facts or confirmations. The action clears the confirmation checkbox and form draft indicator, keeps optional fields visible and preserves unrelated preference edits. Synthetic coverage verifies discarding an invalid required field, the retained unconfirmed-proposal label, keyboard focus, no POST requests, an unchanged database snapshot and independent leave-page warnings. Selected accessibility/overflow checks remain clear at desktop, 390 and 320 pixels. The README now points to this fork’s workspace branch and includes a clearly labeled synthetic desktop preview and a task-oriented navigation table.
+
+The full run passed 548 tests and exposed the onboarding fixture’s formerly single-button fact-form selector. After selecting Save confirmed facts explicitly, both onboarding and fact-discard regressions passed. The runtime change had no remaining test failures.
