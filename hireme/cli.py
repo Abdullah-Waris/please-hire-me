@@ -148,8 +148,8 @@ def main(argv=None):
         elif args.command=='schedule':
             from . import scheduler
             if args.action=='install':print(scheduler.install(store,REPO))
-            elif args.action=='uninstall':scheduler.uninstall();print('Worker schedule removed')
-            else:print(json.dumps(scheduler.status()))
+            elif args.action=='uninstall':scheduler.uninstall(store=store);print('Worker schedule removed')
+            else:print(json.dumps(scheduler.status(store)))
         elif args.command=='duplicate':
             ck=store.company(args.company)
             rows=[dict(r) for r in store.db.execute("SELECT id,state,created,attempted FROM applications WHERE company_key=?",(ck,))]

@@ -120,7 +120,9 @@ A live worker must finish or pause before recovery can acquire its lock.
 
 Pause increments a shared cancellation generation and stops the active cycle at checkpoints, including active CLI inference. Resume permits a new cycle; it cannot revive the old one. A request already sent to an employer cannot be undone. An in-flight API/browser call may finish its timeout before cancellation is observed.
 
-macOS uses a LaunchAgent; Linux uses cron unless Pi systemd units are installed. Cron scheduling must divide 24 hours (1, 2, 3, 4, 6, 8, 12, or 24). Saving a different interval does not update an already-installed OS schedule: reinstall it with `hireme schedule install`. File locks prevent overlapping workers sharing a data directory.
+macOS uses a LaunchAgent; Linux uses cron unless Pi systemd units are installed. Cron scheduling must divide 24 hours (1, 2, 3, 4, 6, 8, 12, or 24). After saving a different interval, use **Preferences → Apply saved interval** to update the OS schedule. This keeps paused applications paused. **Check schedule** compares the installed interval with your saved preference. The terminal equivalent is `hireme schedule install`.
+
+OS schedule names are shared per operating-system user. Installation and removal verify the schedule’s applicant directory, so another instance cannot silently replace it. Remove an existing schedule from its original applicant instance before switching to a different one, or use separate terminal daemons or OS users. File locks prevent overlapping workers sharing a data directory.
 
 ## Run on a Raspberry Pi
 

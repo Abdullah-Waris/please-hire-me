@@ -12,6 +12,9 @@ let state = null,
   view = "today";
 let refreshing = null;
 let backupBusy = false;
+let scheduleLoaded = false,
+  scheduleBusy = false,
+  scheduleStatus = null;
 const dirtyForms = new WeakSet();
 document.addEventListener("input", (event) => {
   if (event.target.form) dirtyForms.add(event.target.form);
@@ -136,6 +139,7 @@ async function api(path, data, raw = false, extraHeaders = {}) {
 }
 function show(name) {
   view = name;
+  if (name === "settings" && state && !scheduleLoaded) loadSchedule();
   $("#page-eyebrow").textContent = {
     setup: "YOUR NEXT CHAPTER",
     today: "YOUR SEARCH, IN MOTION",
@@ -1073,6 +1077,7 @@ function render() {
   $("#recovery-banner").hidden = !state.worker_recovery?.recovery_needed;
   $("#recover-worker").disabled = state.demo || state.worker_running;
   $("#demo-banner").hidden = !state.demo;
+  updateScheduleControls();
   $("#download-backup").disabled =
     state.demo || state.worker_running || backupBusy;
   $("#backup-state").textContent = backupBusy
@@ -1218,6 +1223,7 @@ $("#settings-form").onsubmit = async (event) => {
     note("Search preferences saved.");
     document.activeElement.blur();
     await refresh();
+    updateScheduleControls();
   } catch (error) {
     note(error.message, true);
   }
@@ -1279,6 +1285,68 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refresh();
 });
 $("#retry-connection").onclick = refresh;
+
+function updateScheduleControls() {
+  const unsaved = dirtyForms.has($("#settings-form"));
+  $("#apply-schedule").disabled =
+    !state ||
+    state.demo ||
+    scheduleBusy ||
+    !scheduleStatus ||
+    scheduleStatus.error ||
+    (scheduleStatus.installed && !scheduleStatus.matches_applicant) ||
+    state.worker_running ||
+    state.worker_recovery?.recovery_needed ||
+    !state.settings.onboarding_complete ||
+    state.missing_setup.length > 0 ||
+    unsaved;
+  $("#check-schedule").disabled = scheduleBusy;
+  if (!scheduleStatus || !state) return;
+  $("#schedule-state").textContent = state.demo
+    ? "Schedules are unavailable in the read-only sample."
+    : scheduleStatus.error ||
+      (scheduleStatus.installed && !scheduleStatus.matches_applicant
+        ? "The saved schedule belongs to another applicant or cannot be verified. Manage it from its original instance before replacing it."
+        : `${scheduleStatus.installed ? `Installed interval: ${scheduleStatus.interval_hours ?? "unknown"} hours.${scheduleStatus.enabled === false ? " The system timer is disabled." : ""}` : "No automatic schedule is installed."} Saved interval: ${state.settings.schedule_hours} hours.${unsaved ? " Save your pending preferences before applying." : ""}`);
+}
+async function loadSchedule() {
+  if (scheduleBusy) return;
+  scheduleLoaded = true;
+  scheduleBusy = true;
+  updateScheduleControls();
+  try {
+    scheduleStatus = await api("/api/schedule");
+  } catch (error) {
+    scheduleStatus = { error: error.message };
+  } finally {
+    scheduleBusy = false;
+    updateScheduleControls();
+  }
+}
+$("#check-schedule").onclick = loadSchedule;
+$("#apply-schedule").onclick = async () => {
+  if (scheduleBusy) return;
+  scheduleBusy = true;
+  updateScheduleControls();
+  try {
+    const result = await api("/api/schedule-apply", {});
+    scheduleStatus = {
+      installed: true,
+      matches_applicant: true,
+      interval_hours: result.interval_hours,
+    };
+    note(result.message);
+  } catch (error) {
+    note(error.message, true);
+  } finally {
+    scheduleBusy = false;
+    updateScheduleControls();
+  }
+};
+for (const type of ["input", "change"])
+  document.addEventListener(type, (event) => {
+    if (event.target.form?.id === "settings-form") updateScheduleControls();
+  });
 
 let answerOffset = 0,
   answerRequest = 0,

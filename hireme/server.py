@@ -111,6 +111,11 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                             sort=query.get('sort',['recent'])[0],offset=int(query.get('offset',['0'])[0]))
                     except ValueError as error:return self.send(400,{'error':str(error)})
                     return self.send(200,result)
+                if path=='/api/schedule':
+                    if demo:return self.send(200,{'installed':False,'demo':True})
+                    from .scheduler import status
+                    try:return self.send(200,status(store))
+                    except (OSError,ValueError):return self.send(200,{'installed':False,'error':'The system scheduler is unavailable. Use the terminal scheduler or check your operating-system setup.'})
                 if path=='/api/saved-answers':
                     from .saved_answers import list_answers
                     query=parse_qs(urlsplit(self.path).query)
@@ -204,6 +209,15 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                         try:result=recover_interrupted(store)
                         except Blocked as error:
                             if error.reason=='worker_busy':raise ValueError('A batch is still running. Pause it and wait before recovering interrupted work.') from None
+                            raise
+                    elif path=='/api/schedule-apply':
+                        with state['lock']:
+                            if state['running']:raise ValueError('Wait for the current batch to finish before changing its schedule.')
+                        from .scheduler import apply_saved_interval
+                        from .util import Blocked
+                        try:result=apply_saved_interval(store,repo)
+                        except Blocked as error:
+                            if error.reason=='worker_busy':raise ValueError('Wait for the current batch to finish before changing its schedule.') from None
                             raise
                     elif path=='/api/pause':store.update_settings({'live_enabled':False});result={'paused':True}
                     elif path=='/api/resume-worker':store.update_settings({'live_enabled':True});result={'enabled':True}

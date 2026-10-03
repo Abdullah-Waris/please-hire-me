@@ -804,6 +804,31 @@
               role="status"
             ></span>
           </form>
+          <div class="section">
+            <h2>Automatic batch schedule</h2>
+            <p class="help">
+              Save your preferences first, then apply the saved interval to this
+              computer’s scheduler. Applying a schedule keeps paused
+              applications paused. Your dashboard can be closed while the
+              computer remains awake.
+            </p>
+            <p id="schedule-state" role="status" class="help">
+              Checking installed schedule…
+            </p>
+            <div class="actions">
+              <button
+                id="apply-schedule"
+                type="button"
+                class="secondary"
+                disabled
+              >
+                Apply saved interval
+              </button>
+              <button id="check-schedule" type="button" class="secondary">
+                Check schedule
+              </button>
+            </div>
+          </div>
           <div class="section backup-tools">
             <p class="eyebrow">KEEP YOUR HISTORY WITH YOU</p>
             <h2>Your data and backups</h2>
