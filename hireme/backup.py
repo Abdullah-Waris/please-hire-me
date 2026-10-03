@@ -15,12 +15,36 @@ from .store import Store, worker_lock
 
 
 def _validate_references(store):
+    validated=set()
+    def document(h,name,directory):
+        suffix=r'\.pdf' if directory=='documents' else r'\.(?:pdf|docx|pptx|txt|md)'
+        if not isinstance(h,str) or not isinstance(name,str) or not re.fullmatch(r'[a-f0-9]{64}',h) or not re.fullmatch(re.escape(h)+suffix,name):raise ValueError('Invalid document reference in ledger')
+        reference=(directory,h,name)
+        if reference in validated:return
+        parent=store.root/directory
+        if parent.is_symlink():raise ValueError('Unsafe private storage directory')
+        path=parent/name
+        if path.is_symlink() or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=h:raise ValueError('Referenced private document is missing or changed')
+        validated.add(reference)
     for table,directory in (('documents','documents'),('generated_documents','documents'),('materials','materials')):
         for row in store.db.execute('SELECT hash,filename FROM '+table):
-            h,name=row
-            if not re.fullmatch(r'[a-f0-9]{64}',h) or not re.fullmatch(re.escape(h)+r'\.(?:pdf|docx|pptx|txt|md)',name):raise ValueError('Invalid document reference in ledger')
-            path=store.root/directory/name
-            if path.is_symlink() or not path.is_file() or hashlib.sha256(path.read_bytes()).hexdigest()!=h:raise ValueError('Referenced private document is missing or changed')
+            document(*row,directory)
+    for app in store.db.execute('SELECT package,screenshot FROM applications'):
+        # Preserve damaged/legacy package text for recovery. Readable references
+        # still must resolve, even after the current upload was replaced/withdrawn.
+        try:package=json.loads(app['package'])
+        except (ValueError,TypeError):package={}
+        references=package.get('documents',[]) if isinstance(package,dict) else []
+        if isinstance(references,list):
+            for reference in references:
+                if isinstance(reference,dict):document(reference.get('hash'),reference.get('filename'),'documents')
+        name=app['screenshot']
+        if name:
+            if not isinstance(name,str) or not re.fullmatch(r'[a-f0-9]{64}-(?:before|after|verified)\.jpg',name):raise ValueError('Invalid screenshot reference in ledger')
+            parent=store.root/'screenshots'
+            if parent.is_symlink():raise ValueError('Unsafe private storage directory')
+            path=parent/name
+            if path.is_symlink() or not path.is_file():raise ValueError('Referenced application screenshot is missing')
 
 
 def create_backup(store, destination: Path):

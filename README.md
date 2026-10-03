@@ -215,6 +215,8 @@ Do not split one applicant’s history across directories. CLI commands for that
 
 You can download a history backup from **Preferences → Your data and backups**. Wait for an active batch to finish before downloading. The backup leaves your original ledger and worker settings unchanged. To restore it, use the CLI command above with a new private directory.
 
+Backup validation checks readable application packages as well as current document selections, so replaced or withdrawn PDFs needed by past attempts must still be present. Recorded screenshots must also exist. Restore checks those ledger references independently of the archive manifest. Unreadable legacy package text is retained for recovery rather than rewritten.
+
 Backups use SQLite’s backup API, include documents/history/evidence, verify checksums on restore, and restore **paused**. They exclude integration credentials, account keys and browser sessions: reconnect those on the destination. The archive contains personal information and is **not encrypted**; store it securely. SD cards can fail; keep an off-device copy and test a restore.
 
 If the worker created employer accounts, transfer their generated passwords separately:
