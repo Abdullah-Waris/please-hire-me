@@ -194,13 +194,14 @@ def test_fresh_user_guided_setup_saves_paused_and_provider_key_private(tmp_path)
             page.locator('#context-form textarea').fill('I built a Python tool that helps students organize their coursework.')
             page.locator('#context-form input[type=checkbox]').check();page.locator('#context-form button').click();expect(page.locator('#notice')).to_contain_text('Approved context saved')
             page.locator('#setup-next').click();page.locator('#setup-next').click();expect(page.locator('#guided-label')).to_contain_text('Step 5')
-            page.locator('#settings-form [name=max_attempts_per_cycle]').fill('2');page.locator('#settings-form button').click();expect(page.locator('#notice')).to_contain_text('Search preferences saved')
+            page.locator('#settings-form [name=seniority]').fill('internship');page.locator('#settings-form [name=max_attempts_per_cycle]').fill('2');page.locator('#settings-form button').click();expect(page.locator('#notice')).to_contain_text('Search preferences saved')
             page.locator('#setup-next').click();page.locator('#setup-next').click();expect(page.locator('#guided-label')).to_contain_text('Step 7')
             page.locator('#provider-form [name=provider]').select_option('openai-api');page.locator('#provider-form [name=provider_model]').fill('fixture-model');page.locator('#provider-form [name=key]').fill('synthetic-private-provider-key');page.locator('#provider-form button').click();expect(page.locator('#notice')).to_contain_text('Connection saved')
             assert page.locator('#provider-form [name=key]').input_value()==''
             page.locator('#finish-paused').click();expect(page.locator('#notice')).to_contain_text('Applications remain paused')
             ledger=Store(root)
             assert ledger.settings()['onboarding_complete'] and not ledger.settings()['live_enabled']
+            assert ledger.settings()['seniority']==['internship']
             assert ledger.settings()['max_attempts_per_cycle']==2 and ledger.settings()['provider']=='openai-api'
             assert 'synthetic-private-provider-key' not in json.dumps(ledger.snapshot())
             assert ledger.db.execute('SELECT count(*) FROM materials WHERE confirmed=1').fetchone()[0]==1
