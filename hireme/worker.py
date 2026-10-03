@@ -30,11 +30,13 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,
                 store.checkpoint(); sweep_lists(store)
                 store.checkpoint(); sweep_portals(store)
                 store.checkpoint(); sweep_boards(store,repo)
-            rows=list(store.db.execute("SELECT * FROM jobs WHERE status IN ('discovered','blocked','prepared') AND id NOT IN (SELECT job_id FROM job_decisions) ORDER BY score DESC,first_seen DESC"))
+            query="SELECT * FROM jobs WHERE status IN ('discovered','blocked','prepared') AND id NOT IN (SELECT job_id FROM job_decisions)"
+            selected=tuple(job_ids or ())
+            if selected:query+=' AND id IN ('+','.join('?' for _ in selected)+')'
+            rows=list(store.db.execute(query+' ORDER BY score DESC,first_seen DESC',selected))
             ranked=[]
             for row in rows:
                 store.checkpoint()
-                if job_ids and row['id'] not in job_ids:continue
                 job=json.loads(row['payload'])
                 try:
                     score,evidence=eligible(job,s,store.facts())
