@@ -13,14 +13,22 @@ REPO=Path(__file__).resolve().parent.parent
 DEFAULT_ROOT=Path.home()/'.local/share/please-hire-me'
 
 
+def dashboard_port(value):
+    try: port=int(value)
+    except ValueError: raise argparse.ArgumentTypeError('Choose a port between 1 and 65535') from None
+    if not 1<=port<=65535: raise argparse.ArgumentTypeError('Choose a port between 1 and 65535')
+    return port
+
+
 def main(argv=None):
     parser=argparse.ArgumentParser(description='Automatic job applications with verified facts')
     parser.add_argument('--data-dir',type=Path,default=DEFAULT_ROOT)
     sub=parser.add_subparsers(dest='command',required=True)
-    p=sub.add_parser('open-dashboard');p.add_argument('--port',type=int,default=8766)
-    p=sub.add_parser('demo',help='Explore a disposable, read-only sample workspace');p.add_argument('--port',type=int,default=8767)
+    p=sub.add_parser('open-dashboard');p.add_argument('--port',type=dashboard_port,default=8766)
+    p=sub.add_parser('demo',help='Explore a disposable, read-only sample workspace');p.add_argument('--port',type=dashboard_port,default=8767);p.add_argument('--open',action='store_true',help='Open the preview in your default browser')
     p=sub.add_parser('export-ledger',help='Save job metadata as a CSV spreadsheet');p.add_argument('path',type=Path)
-    p=sub.add_parser('dashboard');p.add_argument('--port',type=int,default=8766)
+    p=sub.add_parser('dashboard');p.add_argument('--port',type=dashboard_port,default=8766);p.add_argument('--open',action='store_true',help='Open the workspace in your default browser')
+    p=sub.add_parser('doctor',help='Check local setup without sending applications');p.add_argument('--verify-login',action='store_true');p.add_argument('--json',action='store_true')
     p=sub.add_parser('import-material');p.add_argument('path',type=Path);p.add_argument('--kind',choices=['writing_sample','cover_letter','context'],required=True)
     p=sub.add_parser('import-resume');p.add_argument('path',type=Path);p.add_argument('--transcript',action='store_true')
     p=sub.add_parser('gmail');p.add_argument('action',choices=['import-client','connect','status','disconnect']);p.add_argument('path',type=Path,nargs='?')
@@ -45,7 +53,9 @@ def main(argv=None):
     os.umask(0o077)
     if args.command=='demo':
         from .demo import run
-        run(REPO,args.port);return 0
+        try:run(REPO,args.port,open_browser=args.open);return 0
+        except OSError as error:
+            print(f'Could not open the sample workspace on port {args.port}: {error.strerror}. Choose another port with --port.',file=sys.stderr);return 2
     if args.command=='restore':
         from .backup import restore_backup
         try:print(json.dumps(restore_backup(args.path,args.data_dir.expanduser().absolute())));return 0
@@ -54,8 +64,17 @@ def main(argv=None):
     try:
         if args.command=='dashboard':
             from .server import serve
-            store.close();serve(args.data_dir.expanduser().absolute(),REPO,args.port);return
-        if args.command=='import-resume':
+            store.close()
+            try:serve(args.data_dir.expanduser().absolute(),REPO,args.port,open_browser=args.open)
+            except OSError as error:
+                print(f'Could not open the dashboard on port {args.port}: {error.strerror}. Choose another port with --port.',file=sys.stderr);return 2
+            return 0
+        if args.command=='doctor':
+            from .doctor import diagnose,format_report
+            result=diagnose(store,args.verify_login)
+            print(json.dumps(result,indent=2) if args.json else format_report(result))
+            return 0 if result['ready'] else 1
+        elif args.command=='import-resume':
             from .onboarding import import_resume
             r=import_resume(store,args.path.expanduser(),'transcript' if args.transcript else 'resume')
             print(json.dumps({'imported':r['hash'],'candidate_fields':sorted(r['candidates']),'next':'Confirm facts and finish setup in the dashboard'}))

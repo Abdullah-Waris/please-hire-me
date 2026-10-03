@@ -404,3 +404,41 @@ def test_unsaved_forms_survive_refresh_and_invalid_aliases_are_actionable(tmp_pa
             assert not errors
             browser.close()
     finally: process.terminate(); process.join(5)
+
+
+def test_essential_facts_optional_toggle_and_provider_fields(tmp_path):
+    from playwright.sync_api import sync_playwright, expect
+    root = tmp_path / 'private'
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 390, 'height': 844})
+            page.goto(base + '/#token=fixture-capability')
+            page.locator('[data-view=profile]').click()
+            expect(page.locator('#facts-form input[name][required]:visible, #facts-form textarea[name][required]:visible')).to_have_count(12)
+            expect(page.locator('#facts-form [name=preferred_name]')).to_be_hidden()
+            page.locator('#show-optional-facts').check()
+            page.locator('#facts-form [name=preferred_name]').fill('Saved in my draft')
+            page.locator('#show-optional-facts').uncheck()
+            page.evaluate('refresh()')
+            page.locator('#show-optional-facts').check()
+            expect(page.locator('#facts-form [name=preferred_name]')).to_have_value('Saved in my draft')
+            expect(page.locator('[data-draft-for=facts-form]')).to_contain_text('Unsaved changes')
+            page.locator('[data-view=providers]').click()
+            expect(page.locator('#provider-key-field')).to_be_hidden()
+            page.locator('#provider-form [name=provider]').select_option('openai-api')
+            expect(page.locator('#provider-key-field')).to_be_visible()
+            expect(page.locator('#provider-form [name=provider_model]')).to_have_attribute('required', '')
+            page.locator('#provider-form [name=provider_model]').fill('fixture-model')
+            page.locator('#provider-form [name=provider_model]').blur()
+            page.evaluate('refresh()')
+            expect(page.locator('#provider-key-field')).to_be_visible()
+            expect(page.locator('#provider-form [name=provider_model]')).to_have_value('fixture-model')
+            assert page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            browser.close()
+    finally: process.terminate(); process.join(5)

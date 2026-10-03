@@ -27,10 +27,10 @@ cd please-hire-me
 ./setup.sh
 ```
 
-The script creates a virtual environment, installs pinned runtime dependencies and Chromium, and starts the local web server. On Linux, if browser system libraries are missing, run `.venv/bin/python -m playwright install-deps chromium` using an account allowed to install OS packages. Open the **dashboard URL printed in the terminal**, including its token. Keep this terminal open while using the desk. If dependencies are already installed:
+The script creates a virtual environment, installs pinned runtime dependencies and Chromium, starts the local web server, and opens the dashboard in your default browser when available. On Linux, if browser system libraries are missing, run `.venv/bin/python -m playwright install-deps chromium` using an account allowed to install OS packages. Open the **dashboard URL printed in the terminal**, including its token. Keep this terminal open while using the desk. If dependencies are already installed:
 
 ```bash
-.venv/bin/python -m hireme dashboard
+.venv/bin/python -m hireme dashboard --open
 ```
 
 The setup page checks the machine and guides you through:
@@ -43,7 +43,7 @@ The setup page checks the machine and guides you through:
 6. **Schedule and limits:** choose batch frequency and daily/cycle ceilings. Save preferences before continuing.
 7. **Model connection and run location:** choose CLI or API, check installation/login, and choose this computer or Pi/Linux. Finish **paused**, or explicitly start scheduled applications.
 
-Setup is resumable: saved documents, facts, and preferences remain in the local database after you close the browser. The steps use the same editing screens you can revisit later. Choosing Pi does not transfer your files or provision another machine.
+Your facts initially shows the required essentials; use the optional-facts toggle to add availability, education details, or disclosures. Yes/No suggestions and month pickers help with exact formats. Setup is resumable: saved documents, facts, and preferences remain in the local database after you close the browser. The steps use the same editing screens you can revisit later. Choosing Pi does not transfer your files or provision another machine.
 
 ### Try a sample workspace
 
@@ -57,7 +57,7 @@ Open the printed URL. This creates a temporary, read-only workspace with invente
 
 ### Your application workspace
 
-**Overview** brings together today’s confirmed applications, opportunities needing attention, and your application ledger. Search by company, role, or location; sort by recency, fit, or company; or add a posting you found yourself. Counts include the complete saved ledger, even when the table shows only the top 500 opportunities. **Export CSV** downloads all opportunities, without personal answers or documents. **Needs you** collects questions, blocked opportunities, uncertain outcomes, and employer-account checks in one place.
+**Overview** brings together today’s confirmed applications, opportunities needing attention, and your application ledger. Search by company, role, or location; sort by recency, fit, or company; or add a posting you found yourself. Counts include the complete saved ledger, even when the table shows only the top 500 opportunities. **Export CSV** downloads all opportunities, without personal answers or documents. **Needs you** collects questions, actionable holds, uncertain outcomes, and employer-account checks in one place. Ordinary eligibility mismatches and company limits remain visible in the ledger as **Not a match** or **Limit active**; they do not inflate the attention queue. Holds have a plain-language explanation, a suggested next step, and the exact recorded detail.
 
 Use **Setup checklist** to get started, then revisit **Your facts**, **Writing & context**, and **Preferences** as your search changes. Preferences are grouped by search goals, company boundaries, your pace, model usage, and browser settings. The workspace also works on narrow screens, with labeled application records and horizontal navigation. Unsaved form edits survive automatic refreshes; a connection banner lets you retry if the local dashboard stops responding.
 
@@ -68,6 +68,17 @@ To export job metadata from a terminal:
 ```
 
 Choose a new filename; existing files are never overwritten. CSV is an export of opportunities, not a backup of your applicant data.
+
+### Check your setup
+
+If something is missing, run a local check with actionable next steps:
+
+```bash
+.venv/bin/python -m hireme doctor
+.venv/bin/python -m hireme doctor --verify-login
+```
+
+The first checks installed prerequisites and saved setup. The second also checks subscription CLI login. Neither sends model requests or applications. API credentials and model access are checked on the first request. Use `--json` for structured diagnostics. If the dashboard port is already in use, choose another with `hireme dashboard --port 8768 --open`.
 
 ### Model setup
 

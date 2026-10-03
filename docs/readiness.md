@@ -30,6 +30,15 @@ This audit separates implemented software, fixture evidence, and the remaining l
 - Credential-transfer follow-up: **163 full-suite tests passed in 68.49 seconds** on macOS; an added interruption regression also passed in the eight-test transfer suite. **21 account, backup and transfer tests passed** on Linux ARM64/Python 3.11 under the same 4 GiB/no-runtime-network limits. These exercise real encryption/decryption with synthetic credentials, including resumed partial imports; package dependency checks passed.
 - These fixtures exercise supported browser forms and transport contracts. They do not exercise live Claude/Codex/API inference, Google delivery, actual systemd activation, SD-card durability, or Pi 4 performance.
 
+## Application workspace follow-up
+
+- The frontend now includes live overview cards, search/sort/status filters, responsive application records, a guided checklist, grouped preferences, and an essential-facts view with optional fields.
+- Read-only demo data is disposable and isolated from personal storage. Authenticated CSV exports include the full opportunity ledger and neutralize spreadsheet formula prefixes, while excluding answer packages and documents.
+- Full-ledger totals are verified beyond the 500-row display cap and across 23-hour/25-hour local days. Quiet eligibility decisions remain recorded without inflating the attention queue. Exact diagnostic reasons remain available.
+- Form regressions cover unsaved drafts, optional-field toggles, provider-specific controls, malformed JSON feedback, and connection recovery. Local setup diagnostics and port-error messages have coverage.
+- **183 full-suite tests passed** on macOS ARM64 / Python 3.14 in 71.54 seconds, followed by an additional focused form regression. The five PyMuPDF deprecation warnings remain third-party warnings.
+- An axe-core 4.10.3 audit of all eight screens at 1440px, 390px, and 320px found zero WCAG A/AA rule violations for the selected WCAG 2/2.1 rule tags after contrast and focus fixes. All checked screens had no page overflow. This is automated UI evidence on synthetic data, not live employer acceptance evidence.
+
 ## Outstanding requirements
 
 1. **Employer account coverage:** opted-in native registration/sign-in now has browser integration and fixtures. Site-specific JavaScript/SSO, extra fields, agreement acceptance and account email verification still require manual handling. Initial pages containing only sign-in are held because the actual posting has not yet been read for eligibility. Validate account acceptance on selected real portals before unattended use. At-rest credentials rely on OS permissions; regular history backups exclude them. The separate encrypted account-vault export/import now recovers generated passwords into matching restored history without clearing held account states. Do not broaden browser write permissions or give the model passwords to fill remaining gaps.

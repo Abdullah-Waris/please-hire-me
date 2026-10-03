@@ -1,60 +1,832 @@
 <!doctype html>
 <html lang="en">
-<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="theme-color" content="#f4f6f9"><meta name="description" content="Your private application workspace. Find opportunities, keep track of applications, and move your search forward."><title>Application desk · Your next chapter</title><link rel="stylesheet" href="/style.css"><script src="/app.js" defer></script></head>
-<body>
-<a class="skip" href="#main">Skip to workspace</a>
-<div class="shell"><aside class="rail">
-<a class="brand" href="/" aria-label="Application desk home"><span class="brand-mark" aria-hidden="true">a<span>↗</span></span><span>application desk<span class="brand-caption">YOUR NEXT CHAPTER</span></span></a>
-<div class="rail-note"><span class="privacy-dot"></span> Private workspace</div>
-<nav aria-label="Workspace"><p class="nav-label">YOUR WORKSPACE</p>
-<button data-view="today" aria-current="page"><span class="nav-icon" aria-hidden="true">▦</span>Overview</button>
-<button data-view="questions"><span class="nav-icon" aria-hidden="true">◇</span>Needs you <span id="question-count" class="nav-count"></span></button>
-<p class="nav-label">MAKE IT YOURS</p>
-<button data-view="profile"><span class="nav-icon" aria-hidden="true">◎</span>Your facts</button>
-<button data-view="materials"><span class="nav-icon" aria-hidden="true">▤</span>Writing &amp; context</button>
-<button data-view="settings"><span class="nav-icon" aria-hidden="true">≡</span>Preferences</button>
-<p class="nav-label">CONNECTIONS</p>
-<button data-view="providers"><span class="nav-icon" aria-hidden="true">⌘</span>Model connection</button>
-<button data-view="connections"><span class="nav-icon" aria-hidden="true">✉</span>Email automation</button>
-<button data-view="setup"><span class="nav-icon" aria-hidden="true">✦</span>Setup checklist</button></nav>
-<div class="rail-footer"><div class="worker-indicator"><span id="worker-dot"></span><span id="worker-state">Connecting…</span></div><p>Your documents and application history stay on this computer.</p><span class="footer-label">A LITTLE LESS BUSYWORK.</span></div></aside>
-<main id="main" tabindex="-1"><div id="connection-status" class="connection-banner" role="status" hidden><span id="connection-message"></span><button id="retry-connection" class="secondary" type="button">Reconnect</button></div><div id="notice" role="status" aria-live="polite"></div><div id="demo-banner" class="demo-banner" hidden><span><strong>You’re exploring a sample workspace.</strong> Companies, applications and answers here are invented. Nothing will be submitted or saved.</span><code>hireme dashboard</code></div><div class="workspace-topbar"><span id="workspace-date">YOUR APPLICATION WORKSPACE</span><span class="local-label"><span class="privacy-dot"></span> Local &amp; private</span></div><header class="page-head"><div><p class="eyebrow" id="page-eyebrow">YOUR SEARCH, IN MOTION</p><h1 id="heading">Today’s applications</h1><p id="subheading">Loading your application ledger…</p></div><div class="actions"><button id="pause" class="secondary">Pause</button><button id="run">Run a batch <span aria-hidden="true">↗</span></button></div></header>
-<section id="setup" class="view" hidden><p class="intro">Your documents, your voice, your search. Start with a resume; optional sources can be added later. Everything saves on this computer.</p><div class="setup-banner"><div><span class="eyebrow">A GOOD SEARCH STARTS WITH YOU</span><h2>Your experience.<br>Your voice. Your next step.</h2><p>Give your desk the essentials. It takes care of the repetitive parts, and comes back to you when it needs an answer.</p></div><div class="setup-art" aria-hidden="true"><span class="art-sheet"><span>YOUR NEXT CHAPTER</span><i></i><i></i><i></i><b>↗</b></span><span class="art-tag">Made for your ambitions.</span></div></div><div id="machine-checks" class="section"></div><div class="section-head"><h2>Your setup checklist</h2><span id="setup-progress-text" class="help"></span></div><div id="setup-steps" class="setup-grid"></div><button id="begin-setup">Let’s get started <span aria-hidden="true">→</span></button></section>
-<div id="guided-setup" class="section" hidden><div class="guided-top"><span class="eyebrow">SETTING UP YOUR DESK</span><span id="guided-progress-text" class="help"></span></div><progress id="guided-progress" value="1" max="7" aria-label="Setup progress"></progress><p id="guided-label"></p><div class="actions"><button id="setup-back" class="secondary">Back</button><button id="setup-next">Continue</button><button id="setup-exit" class="secondary">Explore on my own</button></div></div>
-<section id="today" class="view">
-<div class="overview-grid" aria-label="Application overview">
-<article class="metric metric-primary"><div class="metric-top"><span>Submitted today</span><span aria-hidden="true">↗</span></div><strong id="metric-submitted">0</strong><p id="metric-submitted-help">Confirmed applications</p><progress id="submission-progress" value="0" max="28" aria-label="Daily application target"></progress></article>
-<button class="metric metric-attention" id="review-queue"><div class="metric-top"><span>Needs your attention</span><span aria-hidden="true">◇</span></div><strong id="metric-attention">0</strong><p id="metric-attention-help">You're all caught up</p><span class="metric-link">Review your queue <span aria-hidden="true">→</span></span></button>
-<article class="metric"><div class="metric-top"><span>Opportunities</span><span aria-hidden="true">▤</span></div><strong id="metric-opportunities">0</strong><p>In your application ledger</p><span class="metric-foot" id="metric-ready">Discovery is ready when you are</span></article>
-</div>
-<div class="daily-line"><span id="daily-progress">No confirmed applications yet</span><span id="daily-target">Daily target: 28</span></div><div id="setup-callout" class="callout" hidden><h2>Set up once. Let it work.</h2><p>Import your resume, confirm the extracted facts, and answer the few things a resume cannot tell us. Missing facts stay blank.</p><button id="setup-link">Complete your profile</button></div><div class="ledger-panel"><div class="section-head"><div><p class="eyebrow">ONE OPPORTUNITY AT A TIME</p><h2>Application ledger <span id="ledger-count" class="count-pill">0</span></h2></div><div class="ledger-actions"><button id="export-ledger" class="secondary" type="button">Export CSV <span aria-hidden="true">↓</span></button><button id="add-posting" class="secondary">+ Add a posting</button></div></div>
-<div class="ledger-toolbar"><label class="search-field"><span aria-hidden="true">⌕</span><input id="job-search" type="search" placeholder="Search company, role or location" aria-label="Search opportunities"></label><label class="filter-field"><span>Status</span><select id="status-filter"><option value="all">All jobs</option><option value="confirmed">Submitted</option><option value="blocked">Needs action</option><option value="unknown">Uncertain</option><option value="awaiting_verification">Email verification pending</option><option value="discovered">Ready to evaluate</option></select></label><label class="filter-field"><span>Sort</span><select id="job-sort"><option value="recent">Most recent</option><option value="fit">Best fit</option><option value="company">Company A–Z</option></select></label></div>
-<p id="ledger-scope" class="help ledger-scope"></p><div id="jobs"></div></div><details id="add-posting-panel" class="section"><summary>Add a specific posting</summary><p class="help">Found something promising? Add the official application link and we’ll check it against your preferences.</p><form id="job-form" class="form-grid"><label>Company<input name="company" required></label><label>Role<input name="title" required></label><label class="wide">Official application URL<input name="url" type="url" required></label><label>Location<input name="location" required></label><label class="wide">Posting text<textarea name="description" rows="4"></textarea></label><button type="submit">Add to discovery queue</button></form></details><div class="section-head"><div><p class="eyebrow">BEHIND THE SCENES</p><h2>Recent batches</h2></div><span class="help">Your worker’s activity</span></div><div id="runs"></div><details class="section"><summary>Discovery source health</summary><div id="sources"></div></details></section>
-<section id="questions" class="view" hidden><p class="intro">Answer a personal question once and it will be reused for the same wording and options. Account and CAPTCHA blocks link straight to the job. The worker continues with other opportunities.</p><div id="question-list"></div><h2 class="section">Blocked jobs</h2><div id="blocked-jobs"></div><h2 class="section">Uncertain submissions</h2><p>Verify the employer’s confirmation or candidate portal before recording an outcome. These jobs will never be retried automatically.</p><div id="uncertain"></div><h2 class="section">Employer accounts</h2><p>Complete held verification in the dedicated browser, then record evidence that the account exists and you can sign in. Passwords are never displayed here.</p><div id="employer-accounts"></div></section>
-<section id="profile" class="view" hidden><div class="section"><h2>Your resume</h2><p id="resume-state">No resume imported.</p><label class="upload">Import a PDF<input id="resume-upload" type="file" accept="application/pdf"></label><p class="help">The original PDF is copied into private storage. Extracted values require your confirmation.</p></div><div class="section"><h2>Your transcript</h2><p id="transcript-state">No transcript imported.</p><label class="upload">Import a transcript PDF<input id="transcript-upload" type="file" accept="application/pdf"></label><p class="help">Stored privately and uploaded automatically to recognized transcript fields. If an employer requires an official transcript sent directly by your school, handle that through the employer.</p></div><form id="facts-form"><div id="fact-fields"></div><div class="form-footer"><label class="confirmation"><input type="checkbox" id="confirm-facts" required> I confirm these values are accurate. Blank fields remain unknown.</label><button type="submit">Save confirmed facts</button></div></form><div class="section"><h2>Approved answer templates</h2><p>Write factual personal text once. The model can adapt your wording when tailored writing is enabled. Personal claims must be supported by your confirmed sources. Add document examples in Writing &amp; context. Keep company-specific wording in the Needs you queue.</p><form id="template-form" class="form-grid"><label>Use for<select name="category"><option value="motivation">Why this role</option><option value="project">A project I built</option><option value="experience">My background</option></select></label><label class="wide">Your confirmed wording<textarea name="body" rows="5" required minlength="20"></textarea></label><button type="submit">Save approved wording</button></form><div id="templates"></div></div><div class="section"><h2>Start automatic applications</h2><p id="setup-status">Checking required facts…</p><button id="complete-setup">Start automatic applications</button><p class="help">Installs your chosen worker schedule and starts a cycle. No individual application approvals. You can pause at any time.</p></div></section>
-<section id="materials" class="view" hidden>
-<p class="intro">Give the model your writing, cover-letter examples and supporting context. Review the extracted text before it is used. Resume and transcript uploads are in Your facts.</p>
-<form id="material-upload-form" class="form-grid">
-<label>Document purpose<select name="kind"><option value="writing_sample">Writing sample</option><option value="cover_letter">Cover-letter example or template</option><option value="context">Additional context or research</option></select></label>
-<label>Source file<input name="file" type="file" accept=".docx,.pdf,.pptx,.txt,.md" required></label>
-<p class="help wide">DOCX, PDF, PPTX or UTF-8 text; up to 20 MiB. For files containing both an example and research notes, review the relevant excerpts separately. Imported files remain private.</p>
-<button type="submit">Upload for review</button>
-</form>
-<form id="context-form" class="section form-grid"><label class="wide">Additional context or writing<textarea name="text" required minlength="20" maxlength="12000" rows="6"></textarea></label><label>Approved use<select name="role"><option value="personal">My own factual work and experience</option><option value="reference">Background reference only</option><option value="style">Writing style only</option></select></label><label class="confirmation wide"><input type="checkbox" required> I reviewed this text and approve the selected use.</label><button>Save approved context</button></form><div id="material-list"></div>
-</section>
-<section id="connections" class="view" hidden>
-<div class="section"><h2>Your Gmail connection</h2><p id="gmail-state">Checking authorization…</p><p class="intro">Connect the same email you use on applications to read verification codes and receive batch reports. Being signed into Gmail in a browser does not grant background access.</p>
-<label class="upload">Google Desktop OAuth client JSON<input id="gmail-client-upload" type="file" accept="application/json,.json"></label>
-<p class="help">Create a Desktop app OAuth client with the Gmail API enabled in your Google Cloud project. The credentials stay in private storage. <a href="https://developers.google.com/workspace/gmail/api/quickstart/python" target="_blank" rel="noopener noreferrer">Google setup instructions</a>.</p>
-<p>Then run this from the project folder in a terminal on the computer running the worker:</p><pre><code>.venv/bin/python -m hireme gmail connect</code></pre><p class="help">Google will open a consent screen. Select your confirmed application email and authorize reading email and sending reports. Testing-mode OAuth tokens generally expire after seven days; finish the personal-use OAuth setup before relying on unattended runs.</p>
-</div>
-<form id="mail-settings-form" class="section"><h2>Email automation</h2><label class="confirmation"><input name="gmail_verification" type="checkbox"> Retrieve matching email codes for supported application verification steps.</label><label class="confirmation"><input name="gmail_reports" type="checkbox"> Email me a report after each batch, including paused and failed batches.</label><button type="submit">Save email preferences</button><p class="help">Codes stay out of Claude prompts and logs. Unsupported verification steps remain held for manual handling.</p></form>
-<div class="section"><h2>Batch report delivery</h2><div id="report-delivery"></div><button id="flush-reports" class="secondary">Send queued reports</button></div>
-</section>
-<section id="settings" class="view" hidden><form id="settings-form"><div class="form-grid"><label>Locations, one per line<textarea name="locations" rows="4"></textarea></label><label>Summer 2027 locations<textarea name="summer_2027_locations" rows="3"></textarea></label><label>Locations during school<textarea name="school_locations" rows="3"></textarea></label><label>Employers on your resume<textarea name="prior_employers" rows="4"></textarea></label><label>Role keywords, one per line<textarea name="roles" rows="4"></textarea></label><label>Seniority keywords, one per line<textarea name="seniority" rows="3" required></textarea></label><label>Never apply to, one company per line<textarea name="skip_companies" rows="4"></textarea></label><label>Interviewing with, one company per line<textarea name="interview_companies" rows="4"></textarea></label><label>Signed-in portal hosts<textarea name="signed_in_portals" rows="3"></textarea></label><label>Company aliases (JSON object)<textarea name="company_aliases" rows="3"></textarea></label><label>Full-time minimum USD/year<input name="min_annual_usd" type="number" min="0"></label><label>Internship minimum USD/hour<input name="min_hourly_usd" type="number" min="0"></label><label>Maximum required professional years<input name="max_years_required" type="number" min="0" step="0.1"></label><label>Minimum fit score<input name="min_fit_score" type="number" min="0" max="100"></label><label>Lifetime applications per company<input name="max_per_company" type="number" min="1"></label><label>Company cooldown, days<input name="company_cooldown_days" type="number" min="1"></label><label>Hours between batches<input name="schedule_hours" type="number" min="1" max="24"></label><label>Timezone<input name="timezone" required></label><label>Attempt ceiling per batch<input name="max_attempts_per_cycle" type="number" min="1" max="50"></label><label>Model requests per batch<input name="max_model_requests_per_cycle" type="number" min="1" max="200"></label><label>Model requests per day<input name="max_model_requests_per_day" type="number" min="1" max="500"></label><label>API output tokens per request<input name="max_output_tokens" type="number" min="1" max="8000"></label><label>Cycle target<input name="target_per_cycle" type="number" min="1"></label><label>Cycle ceiling<input name="max_per_cycle" type="number" min="1" max="50"></label><label>Daily target<input name="target_per_day" type="number" min="1"></label><label>Daily ceiling<input name="max_per_day" type="number" min="1" max="100"></label><label>Browser<select name="browser_channel"><option value="chrome">Google Chrome</option><option value="chromium">Bundled Chromium</option><option value="system-chromium">System Chromium (Pi)</option></select></label></div><fieldset class="section"><legend>Context and writing</legend><label class="confirmation"><input name="employer_accounts" type="checkbox"> Create and reuse employer accounts with my confirmed email when a supported account form is required. Passwords stay on this computer. Agreement checkboxes and unsupported sign-in steps require manual handling.</label><label class="confirmation"><input name="tailored_writing" type="checkbox"> Adapt answers in the style of my approved writing, with a factual support check.</label><label class="confirmation"><input name="contextual_preferences" type="checkbox"> Choose matching roles, engineering tracks and local work options from my confirmed skills and availability.</label><label class="confirmation"><input name="cover_letters" type="checkbox"> Generate a grounded cover letter when an application requires one. Requires tailored writing above.</label><label>Maximum cover-letter words<input name="cover_letter_words" type="number" min="100" max="350"></label><label class="confirmation"><input name="headless" type="checkbox"> Run the application browser in the background.</label></fieldset><p class="help">Targets are goals, not guarantees. Eligibility, company limits and unknown answers always take priority. Use “hireme login URL” in a terminal to sign into a dedicated portal session.</p><button type="submit">Save preferences</button></form></section>
-<section id="providers" class="view" hidden>
-<p class="intro">Choose your connection explicitly. CLI subscriptions and API billing are separate. No inherited API keys are used.</p>
-<form id="provider-form" class="form-grid"><label>Provider<select name="provider"><option value="claude-cli">Claude Code · subscription</option><option value="codex-cli">Codex CLI · ChatGPT subscription</option><option value="anthropic-api">Anthropic API · paid key</option><option value="openai-api">OpenAI API · paid key</option></select></label><label>Model ID<input name="provider_model" placeholder="Required for API; optional for Codex"></label><label>Run on<select name="deployment"><option value="local">This computer</option><option value="pi">Raspberry Pi / Linux systemd</option></select></label><label>API key (API providers only)<input name="key" type="password" autocomplete="new-password"></label><p class="help wide">Keys are stored in a private local file, never returned to this page or included in backups. API mode makes paid requests to the selected vendor. Set a spending limit in that vendor’s account too. CLI request caps do not guarantee remaining subscription credits.</p><button>Save connection</button></form>
-<div class="section"><h2>Install and sign in</h2><p>Install the selected CLI using its official instructions, then sign in in a terminal on the machine that runs the worker.</p><p><a href="https://code.claude.com/docs/en/setup" target="_blank" rel="noopener noreferrer">Claude Code setup</a> · <a href="https://developers.openai.com/codex/cli" target="_blank" rel="noopener noreferrer">Codex CLI setup</a></p><pre id="provider-instructions">claude auth login</pre><p id="provider-state"></p><button id="check-provider" class="secondary">Check installation and login</button> <button id="remove-provider-key" class="secondary">Remove saved API key</button></div>
-<div class="section"><h2>Ready to work</h2><p>Finish setup with submissions paused, or start automatic batches now. The worker continues with supported applications and holds unknown answers for you.</p><button id="finish-paused" class="secondary">Finish setup · stay paused</button> <button id="finish-start">Start scheduled applications</button><p class="help">For Pi: finish paused on the Pi, run the Pi configuration commands in the README, then start. Changing “Run on” does not transfer data or install an operating system.</p></div>
-</section><footer class="workspace-footer"><span>Small steps. Real progress.</span><span>Application desk · Your private search workspace</span></footer></main></div></body></html>
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <meta name="theme-color" content="#f4f6f9" />
+    <meta
+      name="description"
+      content="Your private application workspace. Find opportunities, keep track of applications, and move your search forward."
+    />
+    <title>Application desk · Your next chapter</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to workspace</a>
+    <div class="shell">
+      <aside class="rail">
+        <a class="brand" href="/" aria-label="Application desk home"
+          ><span class="brand-mark" aria-hidden="true">a<span>↗</span></span
+          ><span
+            >application desk<span class="brand-caption"
+              >YOUR NEXT CHAPTER</span
+            ></span
+          ></a
+        >
+        <div class="rail-note">
+          <span class="privacy-dot"></span> Private workspace
+        </div>
+        <nav aria-label="Workspace">
+          <p class="nav-label">YOUR WORKSPACE</p>
+          <button data-view="today" aria-current="page">
+            <span class="nav-icon" aria-hidden="true">▦</span>Overview
+          </button>
+          <button data-view="questions">
+            <span class="nav-icon" aria-hidden="true">◇</span>Needs you
+            <span id="question-count" class="nav-count"></span>
+          </button>
+          <p class="nav-label">MAKE IT YOURS</p>
+          <button data-view="profile">
+            <span class="nav-icon" aria-hidden="true">◎</span>Your facts
+          </button>
+          <button data-view="materials">
+            <span class="nav-icon" aria-hidden="true">▤</span>Writing &amp;
+            context
+          </button>
+          <button data-view="settings">
+            <span class="nav-icon" aria-hidden="true">≡</span>Preferences
+          </button>
+          <p class="nav-label">CONNECTIONS</p>
+          <button data-view="providers">
+            <span class="nav-icon" aria-hidden="true">⌘</span>Model connection
+          </button>
+          <button data-view="connections">
+            <span class="nav-icon" aria-hidden="true">✉</span>Email automation
+          </button>
+          <button data-view="setup">
+            <span class="nav-icon" aria-hidden="true">✦</span>Setup checklist
+          </button>
+        </nav>
+        <div class="rail-footer">
+          <div class="worker-indicator">
+            <span id="worker-dot"></span
+            ><span id="worker-state">Connecting…</span>
+          </div>
+          <p>Your documents and application history stay on this computer.</p>
+          <span class="footer-label">A LITTLE LESS BUSYWORK.</span>
+        </div>
+      </aside>
+      <main id="main" tabindex="-1">
+        <div
+          id="connection-status"
+          class="connection-banner"
+          role="status"
+          hidden
+        >
+          <span id="connection-message"></span
+          ><button id="retry-connection" class="secondary" type="button">
+            Reconnect
+          </button>
+        </div>
+        <div id="notice" role="status" aria-live="polite"></div>
+        <div id="demo-banner" class="demo-banner" hidden>
+          <span
+            ><strong>You’re exploring a sample workspace.</strong> Companies,
+            applications and answers here are invented. Nothing will be
+            submitted or saved.</span
+          ><code>hireme dashboard</code>
+        </div>
+        <div class="workspace-topbar">
+          <span id="workspace-date">YOUR APPLICATION WORKSPACE</span
+          ><span class="local-label"
+            ><span class="privacy-dot"></span> Local &amp; private</span
+          >
+        </div>
+        <header class="page-head">
+          <div>
+            <p class="eyebrow" id="page-eyebrow">YOUR SEARCH, IN MOTION</p>
+            <h1 id="heading">Today’s applications</h1>
+            <p id="subheading">Loading your application ledger…</p>
+          </div>
+          <div class="actions">
+            <button id="pause" class="secondary">Pause</button
+            ><button id="run">
+              Run a batch <span aria-hidden="true">↗</span>
+            </button>
+          </div>
+        </header>
+        <section id="setup" class="view" hidden>
+          <p class="intro">
+            Your documents, your voice, your search. Start with a resume;
+            optional sources can be added later. Everything saves on this
+            computer.
+          </p>
+          <div class="setup-banner">
+            <div>
+              <span class="eyebrow">A GOOD SEARCH STARTS WITH YOU</span>
+              <h2>Your experience.<br />Your voice. Your next step.</h2>
+              <p>
+                Give your desk the essentials. It takes care of the repetitive
+                parts, and comes back to you when it needs an answer.
+              </p>
+            </div>
+            <div class="setup-art" aria-hidden="true">
+              <span class="art-sheet"
+                ><span>YOUR NEXT CHAPTER</span><i></i><i></i><i></i
+                ><b>↗</b></span
+              ><span class="art-tag">Made for your ambitions.</span>
+            </div>
+          </div>
+          <div id="machine-checks" class="section"></div>
+          <div class="section-head">
+            <h2>Your setup checklist</h2>
+            <span id="setup-progress-text" class="help"></span>
+          </div>
+          <div id="setup-steps" class="setup-grid"></div>
+          <button id="begin-setup">
+            Let’s get started <span aria-hidden="true">→</span>
+          </button>
+        </section>
+        <div id="guided-setup" class="section" hidden>
+          <div class="guided-top">
+            <span class="eyebrow">SETTING UP YOUR DESK</span
+            ><span id="guided-progress-text" class="help"></span>
+          </div>
+          <progress
+            id="guided-progress"
+            value="1"
+            max="7"
+            aria-label="Setup progress"
+          ></progress>
+          <p id="guided-label"></p>
+          <div class="actions">
+            <button id="setup-back" class="secondary">Back</button
+            ><button id="setup-next">Continue</button
+            ><button id="setup-exit" class="secondary">
+              Explore on my own
+            </button>
+          </div>
+        </div>
+        <section id="today" class="view">
+          <div class="overview-grid" aria-label="Application overview">
+            <article class="metric metric-primary">
+              <div class="metric-top">
+                <span>Submitted today</span><span aria-hidden="true">↗</span>
+              </div>
+              <strong id="metric-submitted">0</strong>
+              <p id="metric-submitted-help">Confirmed applications</p>
+              <progress
+                id="submission-progress"
+                value="0"
+                max="28"
+                aria-label="Daily application target"
+              ></progress>
+            </article>
+            <button class="metric metric-attention" id="review-queue">
+              <div class="metric-top">
+                <span>Needs your attention</span
+                ><span aria-hidden="true">◇</span>
+              </div>
+              <strong id="metric-attention">0</strong>
+              <p id="metric-attention-help">You're all caught up</p>
+              <span class="metric-link"
+                >Review your queue <span aria-hidden="true">→</span></span
+              >
+            </button>
+            <article class="metric">
+              <div class="metric-top">
+                <span>Opportunities</span><span aria-hidden="true">▤</span>
+              </div>
+              <strong id="metric-opportunities">0</strong>
+              <p>In your application ledger</p>
+              <span class="metric-foot" id="metric-ready"
+                >Discovery is ready when you are</span
+              >
+            </article>
+          </div>
+          <div class="daily-line">
+            <span id="daily-progress">No confirmed applications yet</span
+            ><span id="daily-target">Daily target: 28</span>
+          </div>
+          <div id="setup-callout" class="callout" hidden>
+            <h2>Set up once. Let it work.</h2>
+            <p>
+              Import your resume, confirm the extracted facts, and answer the
+              few things a resume cannot tell us. Missing facts stay blank.
+            </p>
+            <button id="setup-link">Complete your profile</button>
+          </div>
+          <div class="ledger-panel">
+            <div class="section-head">
+              <div>
+                <p class="eyebrow">ONE OPPORTUNITY AT A TIME</p>
+                <h2>
+                  Application ledger
+                  <span id="ledger-count" class="count-pill">0</span>
+                </h2>
+              </div>
+              <div class="ledger-actions">
+                <button id="export-ledger" class="secondary" type="button">
+                  Export CSV <span aria-hidden="true">↓</span></button
+                ><button id="add-posting" class="secondary">
+                  + Add a posting
+                </button>
+              </div>
+            </div>
+            <div class="ledger-toolbar">
+              <label class="search-field"
+                ><span aria-hidden="true">⌕</span
+                ><input
+                  id="job-search"
+                  type="search"
+                  placeholder="Search company, role or location"
+                  aria-label="Search opportunities" /></label
+              ><label class="filter-field"
+                ><span>Status</span
+                ><select
+                  id="status-filter"
+                  aria-label="Filter opportunities by status"
+                >
+                  <option value="all">All jobs</option>
+                  <option value="confirmed">Submitted</option>
+                  <option value="blocked">Needs action</option>
+                  <option value="not_match">Not a match</option>
+                  <option value="waiting">Limit active</option>
+                  <option value="unknown">Uncertain</option>
+                  <option value="awaiting_verification">
+                    Email verification pending
+                  </option>
+                  <option value="discovered">Ready to evaluate</option>
+                </select></label
+              ><label class="filter-field"
+                ><span>Sort</span
+                ><select id="job-sort" aria-label="Sort opportunities">
+                  <option value="recent">Most recent</option>
+                  <option value="fit">Best fit</option>
+                  <option value="company">Company A–Z</option>
+                </select></label
+              >
+            </div>
+            <p id="ledger-scope" class="help ledger-scope"></p>
+            <div id="jobs"></div>
+          </div>
+          <details id="add-posting-panel" class="section">
+            <summary>Add a specific posting</summary>
+            <p class="help">
+              Found something promising? Add the official application link and
+              we’ll check it against your preferences.
+            </p>
+            <form id="job-form" class="form-grid">
+              <label>Company<input name="company" required /></label
+              ><label>Role<input name="title" required /></label
+              ><label class="wide"
+                >Official application URL<input
+                  name="url"
+                  type="url"
+                  required /></label
+              ><label>Location<input name="location" required /></label
+              ><label class="wide"
+                >Posting text<textarea
+                  name="description"
+                  rows="4"
+                ></textarea></label
+              ><button type="submit">Add to discovery queue</button>
+            </form>
+          </details>
+          <div class="section-head">
+            <div>
+              <p class="eyebrow">BEHIND THE SCENES</p>
+              <h2>Recent batches</h2>
+            </div>
+            <span class="help">Your worker’s activity</span>
+          </div>
+          <div id="runs"></div>
+          <details class="section">
+            <summary>Discovery source health</summary>
+            <div id="sources"></div>
+          </details>
+        </section>
+        <section id="questions" class="view" hidden>
+          <p class="intro">
+            Answer a personal question once and it will be reused for the same
+            wording and options. Account and CAPTCHA blocks link straight to the
+            job. The worker continues with other opportunities.
+          </p>
+          <div id="question-list"></div>
+          <h2 class="section">Applications that need a hand</h2>
+          <div id="blocked-jobs"></div>
+          <h2 class="section">Uncertain submissions</h2>
+          <p>
+            Verify the employer’s confirmation or candidate portal before
+            recording an outcome. These jobs will never be retried
+            automatically.
+          </p>
+          <div id="uncertain"></div>
+          <h2 class="section">Employer accounts</h2>
+          <p>
+            Complete held verification in the dedicated browser, then record
+            evidence that the account exists and you can sign in. Passwords are
+            never displayed here.
+          </p>
+          <div id="employer-accounts"></div>
+        </section>
+        <section id="profile" class="view" hidden>
+          <div class="section">
+            <h2>Your resume</h2>
+            <p id="resume-state">No resume imported.</p>
+            <label class="upload"
+              >Import a PDF<input
+                id="resume-upload"
+                type="file"
+                accept="application/pdf"
+            /></label>
+            <p class="help">
+              The original PDF is copied into private storage. Extracted values
+              require your confirmation.
+            </p>
+          </div>
+          <div class="section">
+            <h2>Your transcript</h2>
+            <p id="transcript-state">No transcript imported.</p>
+            <label class="upload"
+              >Import a transcript PDF<input
+                id="transcript-upload"
+                type="file"
+                accept="application/pdf"
+            /></label>
+            <p class="help">
+              Stored privately and uploaded automatically to recognized
+              transcript fields. If an employer requires an official transcript
+              sent directly by your school, handle that through the employer.
+            </p>
+          </div>
+          <div class="section-head">
+            <div>
+              <h2>The essentials</h2>
+              <p id="fact-completion" class="help"></p>
+            </div>
+          </div>
+          <label class="confirmation optional-toggle"
+            ><input id="show-optional-facts" type="checkbox" /> Show optional
+            facts, availability and disclosures</label
+          ><datalist id="yes-no-values">
+            <option value="Yes"></option>
+            <option value="No"></option>
+          </datalist>
+          <form id="facts-form">
+            <div id="fact-fields"></div>
+            <div class="form-footer">
+              <label class="confirmation"
+                ><input type="checkbox" id="confirm-facts" required /> I confirm
+                these values are accurate. Blank fields remain unknown.</label
+              ><button type="submit">Save confirmed facts</button
+              ><span
+                class="draft-status"
+                data-draft-for="facts-form"
+                role="status"
+              ></span>
+            </div>
+          </form>
+          <div class="section">
+            <h2>Approved answer templates</h2>
+            <p>
+              Write factual personal text once. The model can adapt your wording
+              when tailored writing is enabled. Personal claims must be
+              supported by your confirmed sources. Add document examples in
+              Writing &amp; context. Keep company-specific wording in the Needs
+              you queue.
+            </p>
+            <form id="template-form" class="form-grid">
+              <label
+                >Use for<select name="category">
+                  <option value="motivation">Why this role</option>
+                  <option value="project">A project I built</option>
+                  <option value="experience">My background</option>
+                </select></label
+              ><label class="wide"
+                >Your confirmed wording<textarea
+                  name="body"
+                  rows="5"
+                  required
+                  minlength="20"
+                ></textarea></label
+              ><button type="submit">Save approved wording</button>
+            </form>
+            <div id="templates"></div>
+          </div>
+          <div class="section">
+            <h2>Start automatic applications</h2>
+            <p id="setup-status">Checking required facts…</p>
+            <button id="complete-setup">Start automatic applications</button>
+            <p class="help">
+              Installs your chosen worker schedule and starts a cycle. No
+              individual application approvals. You can pause at any time.
+            </p>
+          </div>
+        </section>
+        <section id="materials" class="view" hidden>
+          <p class="intro">
+            Give the model your writing, cover-letter examples and supporting
+            context. Review the extracted text before it is used. Resume and
+            transcript uploads are in Your facts.
+          </p>
+          <form id="material-upload-form" class="form-grid">
+            <label
+              >Document purpose<select name="kind">
+                <option value="writing_sample">Writing sample</option>
+                <option value="cover_letter">
+                  Cover-letter example or template
+                </option>
+                <option value="context">Additional context or research</option>
+              </select></label
+            >
+            <label
+              >Source file<input
+                name="file"
+                type="file"
+                accept=".docx,.pdf,.pptx,.txt,.md"
+                required
+            /></label>
+            <p class="help wide">
+              DOCX, PDF, PPTX or UTF-8 text; up to 20 MiB. For files containing
+              both an example and research notes, review the relevant excerpts
+              separately. Imported files remain private.
+            </p>
+            <button type="submit">Upload for review</button>
+          </form>
+          <form id="context-form" class="section form-grid">
+            <label class="wide"
+              >Additional context or writing<textarea
+                name="text"
+                required
+                minlength="20"
+                maxlength="12000"
+                rows="6"
+              ></textarea></label
+            ><label
+              >Approved use<select name="role">
+                <option value="personal">
+                  My own factual work and experience
+                </option>
+                <option value="reference">Background reference only</option>
+                <option value="style">Writing style only</option>
+              </select></label
+            ><label class="confirmation wide"
+              ><input type="checkbox" required /> I reviewed this text and
+              approve the selected use.</label
+            ><button>Save approved context</button>
+          </form>
+          <div id="material-list"></div>
+        </section>
+        <section id="connections" class="view" hidden>
+          <div class="section">
+            <h2>Your Gmail connection</h2>
+            <p id="gmail-state">Checking authorization…</p>
+            <p class="intro">
+              Connect the same email you use on applications to read
+              verification codes and receive batch reports. Being signed into
+              Gmail in a browser does not grant background access.
+            </p>
+            <label class="upload"
+              >Google Desktop OAuth client JSON<input
+                id="gmail-client-upload"
+                type="file"
+                accept="application/json,.json"
+            /></label>
+            <p class="help">
+              Create a Desktop app OAuth client with the Gmail API enabled in
+              your Google Cloud project. The credentials stay in private
+              storage.
+              <a
+                href="https://developers.google.com/workspace/gmail/api/quickstart/python"
+                target="_blank"
+                rel="noopener noreferrer"
+                >Google setup instructions</a
+              >.
+            </p>
+            <p>
+              Then run this from the project folder in a terminal on the
+              computer running the worker:
+            </p>
+            <pre
+              tabindex="0"
+              aria-label="Gmail connection command"
+            ><code>.venv/bin/python -m hireme gmail connect</code></pre>
+            <p class="help">
+              Google will open a consent screen. Select your confirmed
+              application email and authorize reading email and sending reports.
+              Testing-mode OAuth tokens generally expire after seven days;
+              finish the personal-use OAuth setup before relying on unattended
+              runs.
+            </p>
+          </div>
+          <form id="mail-settings-form" class="section">
+            <h2>Email automation</h2>
+            <label class="confirmation"
+              ><input name="gmail_verification" type="checkbox" /> Retrieve
+              matching email codes for supported application verification
+              steps.</label
+            ><label class="confirmation"
+              ><input name="gmail_reports" type="checkbox" /> Email me a report
+              after each batch, including paused and failed batches.</label
+            ><button type="submit">Save email preferences</button>
+            <p class="help">
+              Codes stay out of Claude prompts and logs. Unsupported
+              verification steps remain held for manual handling.
+            </p>
+          </form>
+          <div class="section">
+            <h2>Batch report delivery</h2>
+            <div id="report-delivery"></div>
+            <button id="flush-reports" class="secondary">
+              Send queued reports
+            </button>
+          </div>
+        </section>
+        <section id="settings" class="view" hidden>
+          <form id="settings-form">
+            <div class="form-grid">
+              <label
+                >Locations, one per line<textarea
+                  name="locations"
+                  rows="4"
+                ></textarea></label
+              ><label
+                >Summer 2027 locations<textarea
+                  name="summer_2027_locations"
+                  rows="3"
+                ></textarea></label
+              ><label
+                >Locations during school<textarea
+                  name="school_locations"
+                  rows="3"
+                ></textarea></label
+              ><label
+                >Employers on your resume<textarea
+                  name="prior_employers"
+                  rows="4"
+                ></textarea></label
+              ><label
+                >Role keywords, one per line<textarea
+                  name="roles"
+                  rows="4"
+                ></textarea></label
+              ><label
+                >Seniority keywords, one per line<textarea
+                  name="seniority"
+                  rows="3"
+                  required
+                ></textarea></label
+              ><label
+                >Never apply to, one company per line<textarea
+                  name="skip_companies"
+                  rows="4"
+                ></textarea></label
+              ><label
+                >Interviewing with, one company per line<textarea
+                  name="interview_companies"
+                  rows="4"
+                ></textarea></label
+              ><label
+                >Signed-in portal hosts<textarea
+                  name="signed_in_portals"
+                  rows="3"
+                ></textarea></label
+              ><label
+                >Company aliases (JSON object)<textarea
+                  name="company_aliases"
+                  rows="3"
+                ></textarea></label
+              ><label
+                >Full-time minimum USD/year<input
+                  name="min_annual_usd"
+                  type="number"
+                  min="0" /></label
+              ><label
+                >Internship minimum USD/hour<input
+                  name="min_hourly_usd"
+                  type="number"
+                  min="0" /></label
+              ><label
+                >Maximum required professional years<input
+                  name="max_years_required"
+                  type="number"
+                  min="0"
+                  step="0.1" /></label
+              ><label
+                >Minimum fit score<input
+                  name="min_fit_score"
+                  type="number"
+                  min="0"
+                  max="100" /></label
+              ><label
+                >Lifetime applications per company<input
+                  name="max_per_company"
+                  type="number"
+                  min="1" /></label
+              ><label
+                >Company cooldown, days<input
+                  name="company_cooldown_days"
+                  type="number"
+                  min="1" /></label
+              ><label
+                >Hours between batches<input
+                  name="schedule_hours"
+                  type="number"
+                  min="1"
+                  max="24" /></label
+              ><label>Timezone<input name="timezone" required /></label
+              ><label
+                >Attempt ceiling per batch<input
+                  name="max_attempts_per_cycle"
+                  type="number"
+                  min="1"
+                  max="50" /></label
+              ><label
+                >Model requests per batch<input
+                  name="max_model_requests_per_cycle"
+                  type="number"
+                  min="1"
+                  max="200" /></label
+              ><label
+                >Model requests per day<input
+                  name="max_model_requests_per_day"
+                  type="number"
+                  min="1"
+                  max="500" /></label
+              ><label
+                >API output tokens per request<input
+                  name="max_output_tokens"
+                  type="number"
+                  min="1"
+                  max="8000" /></label
+              ><label
+                >Cycle target<input
+                  name="target_per_cycle"
+                  type="number"
+                  min="1" /></label
+              ><label
+                >Cycle ceiling<input
+                  name="max_per_cycle"
+                  type="number"
+                  min="1"
+                  max="50" /></label
+              ><label
+                >Daily target<input
+                  name="target_per_day"
+                  type="number"
+                  min="1" /></label
+              ><label
+                >Daily ceiling<input
+                  name="max_per_day"
+                  type="number"
+                  min="1"
+                  max="100" /></label
+              ><label
+                >Browser<select name="browser_channel">
+                  <option value="chrome">Google Chrome</option>
+                  <option value="chromium">Bundled Chromium</option>
+                  <option value="system-chromium">System Chromium (Pi)</option>
+                </select></label
+              >
+            </div>
+            <fieldset class="section">
+              <legend>Context and writing</legend>
+              <label class="confirmation"
+                ><input name="employer_accounts" type="checkbox" /> Create and
+                reuse employer accounts with my confirmed email when a supported
+                account form is required. Passwords stay on this computer.
+                Agreement checkboxes and unsupported sign-in steps require
+                manual handling.</label
+              ><label class="confirmation"
+                ><input name="tailored_writing" type="checkbox" /> Adapt answers
+                in the style of my approved writing, with a factual support
+                check.</label
+              ><label class="confirmation"
+                ><input name="contextual_preferences" type="checkbox" /> Choose
+                matching roles, engineering tracks and local work options from
+                my confirmed skills and availability.</label
+              ><label class="confirmation"
+                ><input name="cover_letters" type="checkbox" /> Generate a
+                grounded cover letter when an application requires one. Requires
+                tailored writing above.</label
+              ><label
+                >Maximum cover-letter words<input
+                  name="cover_letter_words"
+                  type="number"
+                  min="100"
+                  max="350" /></label
+              ><label class="confirmation"
+                ><input name="headless" type="checkbox" /> Run the application
+                browser in the background.</label
+              >
+            </fieldset>
+            <p class="help">
+              Targets are goals, not guarantees. Eligibility, company limits and
+              unknown answers always take priority. Use “hireme login URL” in a
+              terminal to sign into a dedicated portal session.
+            </p>
+            <button type="submit">Save preferences</button
+            ><span
+              class="draft-status"
+              data-draft-for="settings-form"
+              role="status"
+            ></span>
+          </form>
+        </section>
+        <section id="providers" class="view" hidden>
+          <p class="intro">
+            Choose your connection explicitly. CLI subscriptions and API billing
+            are separate. No inherited API keys are used.
+          </p>
+          <form id="provider-form" class="form-grid">
+            <label
+              >Provider<select name="provider">
+                <option value="claude-cli">Claude Code · subscription</option>
+                <option value="codex-cli">
+                  Codex CLI · ChatGPT subscription
+                </option>
+                <option value="anthropic-api">Anthropic API · paid key</option>
+                <option value="openai-api">OpenAI API · paid key</option>
+              </select></label
+            ><label
+              >Model ID<input
+                name="provider_model"
+                placeholder="Model identifier"
+                aria-describedby="provider-model-help" /><span
+                id="provider-model-help"
+                class="help"
+              ></span></label
+            ><label
+              >Run on<select name="deployment">
+                <option value="local">This computer</option>
+                <option value="pi">Raspberry Pi / Linux systemd</option>
+              </select></label
+            ><label id="provider-key-field"
+              >API key (API providers only)<input
+                name="key"
+                type="password"
+                autocomplete="new-password"
+            /></label>
+            <p class="help wide">
+              Keys are stored in a private local file, never returned to this
+              page or included in backups. API mode makes paid requests to the
+              selected vendor. Set a spending limit in that vendor’s account
+              too. CLI request caps do not guarantee remaining subscription
+              credits.
+            </p>
+            <button>Save connection</button>
+          </form>
+          <div class="section">
+            <h2>Install and sign in</h2>
+            <p>
+              Install the selected CLI using its official instructions, then
+              sign in in a terminal on the machine that runs the worker.
+            </p>
+            <p>
+              <a
+                href="https://code.claude.com/docs/en/setup"
+                target="_blank"
+                rel="noopener noreferrer"
+                >Claude Code setup</a
+              >
+              ·
+              <a
+                href="https://developers.openai.com/codex/cli"
+                target="_blank"
+                rel="noopener noreferrer"
+                >Codex CLI setup</a
+              >
+            </p>
+            <pre
+              id="provider-instructions"
+              tabindex="0"
+              aria-label="Model login instructions"
+            >
+claude auth login</pre
+            >
+            <p id="provider-state"></p>
+            <button id="check-provider" class="secondary">
+              Check installation and login
+            </button>
+            <button id="remove-provider-key" class="secondary">
+              Remove saved API key
+            </button>
+          </div>
+          <div class="section">
+            <h2>Ready to work</h2>
+            <p>
+              Finish setup with submissions paused, or start automatic batches
+              now. The worker continues with supported applications and holds
+              unknown answers for you.
+            </p>
+            <button id="finish-paused" class="secondary">
+              Finish setup · stay paused
+            </button>
+            <button id="finish-start">Start scheduled applications</button>
+            <p class="help">
+              For Pi: finish paused on the Pi, run the Pi configuration commands
+              in the README, then start. Changing “Run on” does not transfer
+              data or install an operating system.
+            </p>
+          </div>
+        </section>
+        <footer class="workspace-footer">
+          <span>Small steps. Real progress.</span
+          ><span>Application desk · Your private search workspace</span>
+        </footer>
+      </main>
+    </div>
+  </body>
+</html>

@@ -57,11 +57,11 @@ def seed(store):
                          'outcomes': {'confirmed': 2, 'blocked': 1}, 'reason': 'Sample batch. No applications were sent.'})))
 
 
-def run(repo: Path, port=8767):
+def run(repo: Path, port=8767, open_browser=False):
     from .server import serve
     with TemporaryDirectory(prefix='hireme-preview-') as directory:
         root = Path(directory) / 'workspace'
         store = Store(root)
         try: seed(store)
         finally: store.close()
-        serve(root, repo, port, demo=True)
+        serve(root, repo, port, demo=True, open_browser=open_browser)

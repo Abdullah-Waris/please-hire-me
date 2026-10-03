@@ -26,7 +26,7 @@ def dashboard_url(root,port=8766):
     return f'http://127.0.0.1:{port}/#token={token}'
 
 
-def serve(root,repo,port=8766,token=None,demo=False):
+def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
     token=token or (secrets.token_urlsafe(32) if demo else dashboard_url(root,port).split('#token=',1)[1]); state={'running':False,'lock':threading.Lock()}
     assets=Path(__file__).parent/'static'
     def start_cycle():
@@ -81,6 +81,8 @@ def serve(root,repo,port=8766,token=None,demo=False):
                     else:snapshot['readiness']=readiness(store)
                     from .ledger import summary
                     snapshot['summary']=summary(store)
+                    from .presentation import job_display
+                    snapshot['jobs']=[{**job,**job_display(job)} for job in snapshot['jobs']]
                     snapshot['demo']=demo
                     return self.send(200,{**snapshot,'fact_labels':FACTS,'required':sorted(REQUIRED),'worker_running':state['running'] or any(r['status']=='running' for r in snapshot['runs'])})
                 if path=='/api/export.csv':
@@ -190,6 +192,12 @@ def serve(root,repo,port=8766,token=None,demo=False):
             except (ValueError,KeyError,TypeError) as e:return self.send(400,{'error':str(e)})
             except Exception as e:return self.send(500,{'error':type(e).__name__})
     server=ThreadingHTTPServer(('127.0.0.1',port),Handler)
-    print(f'Dashboard: http://127.0.0.1:{port}/#token={token}',flush=True)
+    url=f'http://127.0.0.1:{port}/#token={token}'
+    print(f'Dashboard: {url}',flush=True)
+    if open_browser:
+        import webbrowser
+        try:
+            if not webbrowser.open(url):print('Open the printed URL in your browser.',flush=True)
+        except OSError:print('Open the printed URL in your browser.',flush=True)
     try:server.serve_forever()
     finally:server.server_close()

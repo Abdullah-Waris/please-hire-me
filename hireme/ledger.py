@@ -7,11 +7,11 @@ import json
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
+from .presentation import QUIET_REASONS, job_display
+
 EXPORT_COLUMNS = ('Company', 'Role', 'Location', 'Status', 'Fit score', 'Application URL',
                   'First discovered', 'Last updated', 'Attempted', 'Reason')
-STATUS_LABELS = {'confirmed': 'Submitted', 'blocked': 'Needs action', 'unknown': 'Uncertain',
-                 'awaiting_verification': 'Email verification pending', 'discovered': 'Ready to evaluate',
-                 'rejected': 'Not a match'}
+
 
 
 def summary(store, at=None):
@@ -24,11 +24,15 @@ def summary(store, at=None):
     counts = dict(store.db.execute('SELECT status,COUNT(*) FROM jobs GROUP BY status'))
     submitted = store.db.execute("""SELECT COUNT(*) FROM applications
         WHERE state='confirmed' AND attempted>=? AND attempted<?""", bounds).fetchone()[0]
-    attention = store.db.execute("""SELECT COUNT(*) FROM (
+    excluded = tuple(sorted(QUIET_REASONS))
+    placeholders = ','.join('?' for _ in excluded)
+    attention = store.db.execute(f"""SELECT COUNT(*) FROM (
         SELECT job_id FROM questions WHERE resolved=0
-        UNION SELECT id FROM jobs WHERE status IN ('blocked','unknown','awaiting_verification')
+        UNION SELECT id FROM jobs WHERE status IN ('unknown','awaiting_verification')
+            OR (status='blocked' AND TRIM(SUBSTR(reason,1,CASE WHEN INSTR(reason,':')>0
+                THEN INSTR(reason,':')-1 ELSE LENGTH(reason) END)) NOT IN ({placeholders}))
         UNION SELECT job_id FROM applications WHERE state IN ('unknown','awaiting_verification')
-    )""").fetchone()[0]
+    )""", excluded).fetchone()[0]
     accounts = store.db.execute("SELECT COUNT(*) FROM employer_accounts WHERE state='uncertain'").fetchone()[0]
     return {'job_count': sum(counts.values()), 'status_counts': counts, 'submitted_today': submitted,
             'attention_count': attention + accounts, 'local_date': local.date().isoformat()}
@@ -52,7 +56,7 @@ def export_csv(store):
         try: location = json.loads(job['payload']).get('location', '')
         except (ValueError, TypeError): location = ''
         writer.writerow([spreadsheet_text(value) for value in (
-            job['company'], job['title'], location, STATUS_LABELS.get(job['status'], job['status']),
+            job['company'], job['title'], location, job_display(dict(job))['status_label'],
             job['score'], job['url'], job['first_seen'], job['updated'], job['attempted'], job['reason'])])
     # UTF-8 BOM helps common spreadsheet apps recognize non-ASCII employer names.
     return output.getvalue().encode('utf-8-sig')
