@@ -342,7 +342,7 @@ def test_demo_is_read_only_and_export_requires_auth(tmp_path):
             except OSError: time.sleep(.1)
         try: urllib.request.urlopen(base + '/api/export.csv'); assert False
         except urllib.error.HTTPError as error: assert error.code == 403
-        for endpoint in ('pause', 'resume-worker', 'run', 'facts', 'settings', 'complete-setup'):
+        for endpoint in ('pause', 'resume-worker', 'run', 'facts', 'settings', 'complete-setup', 'backup'):
             request = urllib.request.Request(base + '/api/' + endpoint, data=b'{}', headers={'X-Hireme-Token': 'fixture-capability'})
             try: urllib.request.urlopen(request); assert False
             except urllib.error.HTTPError as error:
@@ -511,4 +511,51 @@ def test_opportunity_dialog_and_approved_wording_edits(store, job):
             assert not store.templates()
             assert not errors
             browser.close()
+    finally: process.terminate(); process.join(5)
+
+
+def test_dashboard_backup_download_restores_paused_and_excludes_credentials(store, job, package, tmp_path):
+    from playwright.sync_api import sync_playwright, expect
+    from hireme.backup import restore_backup
+    from hireme.store import Store, worker_lock
+    store.prepare(job, package)
+    integrations = store.root / 'integrations'; integrations.mkdir(exist_ok=True)
+    (integrations / 'provider-key.json').write_text('{"key":"synthetic-do-not-export"}')
+    before = store.settings(); generation = store.control_generation()
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        for headers in ({}, {'X-Hireme-Token': 'fixture-capability', 'Origin': 'https://attacker.invalid'}):
+            request = urllib.request.Request(base + '/api/backup', data=b'{}', headers=headers)
+            try: urllib.request.urlopen(request); assert False
+            except urllib.error.HTTPError as error: assert error.code == 403
+        with worker_lock(store.root):
+            request = urllib.request.Request(base + '/api/backup', data=b'{}', headers={'X-Hireme-Token': 'fixture-capability'})
+            try: urllib.request.urlopen(request); assert False
+            except urllib.error.HTTPError as error:
+                assert error.code == 400 and b'Wait for the active batch' in error.read()
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page()
+            page.goto(base + '/#token=fixture-capability'); page.locator('[data-view=settings]').click()
+            expect(page.locator('#download-backup')).to_be_enabled()
+            with page.expect_download() as download:
+                page.locator('#download-backup').click()
+            archive = tmp_path / 'download.zip'; download.value.save_as(archive)
+            assert download.value.suggested_filename == 'application-history.zip'
+            expect(page.locator('#notice')).to_contain_text('History backup downloaded')
+            browser.close()
+        assert store.settings() == before and store.control_generation() == generation
+        restored_root = tmp_path / 'restored'
+        restore_backup(archive, restored_root)
+        restored = Store(restored_root)
+        try:
+            assert not restored.settings()['live_enabled']
+            assert restored.facts()['email']['value'] == store.facts()['email']['value']
+            assert restored.db.execute('SELECT * FROM applications').fetchone()
+            assert not (restored_root / 'integrations/provider-key.json').exists()
+        finally: restored.close()
     finally: process.terminate(); process.join(5)

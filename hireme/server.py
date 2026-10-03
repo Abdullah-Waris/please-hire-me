@@ -50,15 +50,28 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
         def _auth(self):
             origin=self.headers.get('Origin')
             return self._valid_host() and secrets.compare_digest(self.headers.get('X-Hireme-Token',''),token) and origin in (None,f'http://127.0.0.1:{port}',f'http://localhost:{port}')
-        def send(self,code,data,ctype='application/json',download=None):
-            body=json.dumps(data).encode() if ctype=='application/json' else data
+        def _respond_headers(self,code,size,ctype,download=None):
             self.send_response(code)
-            self.send_header('Content-Type',ctype);self.send_header('Content-Length',str(len(body)))
-            self.send_header('Cache-Control','no-store');self.send_header('X-Content-Type-Options','nosniff')
+            self.send_header('Content-Type',ctype)
+            self.send_header('Content-Length',str(size))
+            self.send_header('Cache-Control','no-store')
+            self.send_header('X-Content-Type-Options','nosniff')
             self.send_header('Referrer-Policy','no-referrer')
             if download:self.send_header('Content-Disposition',f'attachment; filename="{download}"')
             self.send_header('Content-Security-Policy',"default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; form-action 'self'; base-uri 'none'")
-            self.end_headers();self.wfile.write(body)
+            self.end_headers()
+
+        def send(self,code,data,ctype='application/json',download=None):
+            body=json.dumps(data).encode() if ctype=='application/json' else data
+            self._respond_headers(code,len(body),ctype,download)
+            self.wfile.write(body)
+
+        def send_file(self,path,ctype,download):
+            import shutil
+            with path.open('rb') as source:
+                self._respond_headers(200,path.stat().st_size,ctype,download)
+                shutil.copyfileobj(source,self.wfile,length=64*1024)
+
         def do_GET(self):
             path=urlsplit(self.path).path
             if not self._valid_host():return self.send(403,{'error':'Invalid host'})
@@ -137,6 +150,19 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                         if role not in ('personal','style','reference') or not isinstance(text,str) or not 20<=len(text)<=12000:raise ValueError('Provide 20–12,000 characters and an approved use')
                         material=import_material(store,text.encode(),'Typed context.txt','writing_sample' if role=='style' else 'context')
                         review_material(store,material['id'],text,role,True);result={'saved':True}
+                    elif path=='/api/backup':
+                        import tempfile
+                        from .backup import create_backup
+                        from .util import Blocked
+                        with state['lock']:
+                            if state['running']:raise ValueError('Wait for the active batch to finish before downloading a backup')
+                        with tempfile.TemporaryDirectory(prefix='hireme-backup-') as directory:
+                            archive=Path(directory)/'application-history.zip'
+                            try:create_backup(store,archive)
+                            except Blocked as error:
+                                if error.reason=='worker_busy':raise ValueError('Wait for the active batch to finish before downloading a backup') from None
+                                raise
+                            return self.send_file(archive,'application/zip','application-history.zip')
                     elif path=='/api/facts':store.put_facts(data['facts'],clear_keys=data.get('clear'));result={'saved':True}
                     elif path=='/api/answer':store.answer_question(data['id'],data['value'],data.get('fact_key'));result={'saved':True}
                     elif path=='/api/material-review':

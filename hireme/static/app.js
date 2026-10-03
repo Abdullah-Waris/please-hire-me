@@ -9,6 +9,7 @@ history.replaceState(null, "", location.pathname);
 let state = null,
   view = "today";
 let refreshing = null;
+let backupBusy = false;
 const dirtyForms = new WeakSet();
 document.addEventListener("input", (event) => {
   if (event.target.form) dirtyForms.add(event.target.form);
@@ -1015,6 +1016,15 @@ function render() {
     !state.settings.live_enabled ||
     state.missing_setup.length > 0;
   $("#demo-banner").hidden = !state.demo;
+  $("#download-backup").disabled =
+    state.demo || state.worker_running || backupBusy;
+  $("#backup-state").textContent = backupBusy
+    ? "Preparing your private archive…"
+    : state.demo
+      ? "Backups are available in your own workspace."
+      : state.worker_running
+        ? "Wait for the active batch to finish before downloading."
+        : "Your original ledger stays on this computer. The downloaded copy is a separate backup.";
   renderLedger();
   renderSetup();
   renderQuestions();
@@ -1902,3 +1912,42 @@ $("#job-dialog").addEventListener("click", (event) => {
 $("#job-dialog").addEventListener("close", () =>
   document.body.classList.remove("dialog-open"),
 );
+
+$("#download-backup").onclick = async () => {
+  if (backupBusy) return;
+  backupBusy = true;
+  render();
+  try {
+    const response = await fetch("/api/backup", {
+      method: "POST",
+      headers: { "X-Hireme-Token": token, "Content-Type": "application/json" },
+      body: "{}",
+    });
+    if (!response.ok) {
+      let error;
+      try {
+        error = (await response.json()).error;
+      } catch {}
+      throw new Error(
+        error ||
+          "Could not prepare your backup. Try again after the active batch finishes.",
+      );
+    }
+    const url = URL.createObjectURL(await response.blob()),
+      anchor = el("a");
+    anchor.href = url;
+    anchor.download = "application-history.zip";
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    note(
+      "History backup downloaded. Keep this private archive in a safe location.",
+    );
+  } catch (error) {
+    note(error.message, true);
+  } finally {
+    backupBusy = false;
+    render();
+  }
+};

@@ -100,8 +100,8 @@
             <p id="subheading">Loading your application ledger…</p>
           </div>
           <div class="actions">
-            <button id="pause" class="secondary">Pause</button
-            ><button id="run">
+            <button id="pause" class="secondary" disabled>Pause</button
+            ><button id="run" disabled>
               Run a batch <span aria-hidden="true">↗</span>
             </button>
           </div>
@@ -725,6 +725,29 @@
               role="status"
             ></span>
           </form>
+          <div class="section backup-tools">
+            <p class="eyebrow">KEEP YOUR HISTORY WITH YOU</p>
+            <h2>Your data and backups</h2>
+            <p class="intro">
+              Download a consistent copy of your application history, confirmed
+              facts, documents and reviewed sources. Restoring a backup starts
+              with applications paused.
+            </p>
+            <p class="help">
+              The archive contains personal information and is not encrypted.
+              Save it somewhere private. API keys, Gmail authorization, employer
+              passwords and browser sessions are excluded.
+            </p>
+            <button
+              id="download-backup"
+              class="secondary"
+              type="button"
+              disabled
+            >
+              Download history backup <span aria-hidden="true">↓</span>
+            </button>
+            <p id="backup-state" class="help">Checking worker status…</p>
+          </div>
         </section>
         <section id="providers" class="view" hidden>
           <p class="intro">
