@@ -55,3 +55,31 @@ def test_dashboard_port_collision_has_actionable_message(store, monkeypatch, cap
     monkeypatch.setattr('hireme.server.serve', occupied)
     assert main(['--data-dir', str(store.root), 'dashboard']) == 2
     assert 'Choose another port with --port' in capsys.readouterr().err
+
+
+def test_dashboard_diagnostics_refreshes_browser_without_login_or_writes(store, monkeypatch):
+    from hireme.doctor import dashboard_diagnostics
+    seen = []
+    monkeypatch.setattr('hireme.setup_status.browser_available', lambda channel, force=False: seen.append((channel, force)) or True)
+    monkeypatch.setattr('hireme.doctor.readiness', lambda s, verify=False: readiness(False))
+    store.put_facts({'full_name': 'Private Synthetic Name', 'email': 'private@candidate.invalid'})
+    before = store.snapshot(); changes = store.db.total_changes
+    result = dashboard_diagnostics(store)
+    assert seen == [('chromium', True)]
+    assert result['checked_at'] and not result['verified_login']
+    assert 'Private Synthetic Name' not in result['report']
+    assert 'private@candidate.invalid' not in result['report']
+    assert str(store.root) not in result['report']
+    assert 'Currently authorized to work in the US' in result['report']
+    assert store.snapshot() == before and store.db.total_changes == changes
+    assert not store.db.execute('SELECT * FROM model_requests').fetchone()
+
+
+def test_demo_diagnostics_uses_sample_readiness_without_machine_checks(store, monkeypatch):
+    from hireme.doctor import dashboard_diagnostics
+    def forbidden(*args, **kwargs): raise AssertionError('Demo inspected real setup')
+    monkeypatch.setattr('hireme.doctor.readiness', forbidden)
+    monkeypatch.setattr('hireme.setup_status.browser_available', forbidden)
+    result = dashboard_diagnostics(store, demo=True)
+    assert result['demo'] and 'Sample workspace' in result['report']
+    assert 'No model connected in this preview.' in result['report']

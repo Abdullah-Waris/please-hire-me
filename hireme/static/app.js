@@ -14,6 +14,8 @@ let refreshing = null;
 let backupBusy = false;
 let transcriptWithdrawalBusy = false;
 let postingCheckRequest = 0;
+let diagnosticsResult = null,
+  diagnosticsBusy = false;
 let renderedAccountSignature = null;
 let aliasJsonMode = false;
 let renderedBlockedSignature = null;
@@ -2810,6 +2812,69 @@ const setupSteps = [
   ],
 ];
 let setupStep = -1;
+
+function updateDiagnosticsControls() {
+  $("#check-setup").disabled = diagnosticsBusy;
+  $("#check-setup").textContent = diagnosticsBusy
+    ? "Checking setup…"
+    : "Check local setup";
+  $("#download-setup-report").disabled = diagnosticsBusy || !diagnosticsResult;
+}
+$("#check-setup").onclick = async () => {
+  if (diagnosticsBusy) return;
+  diagnosticsBusy = true;
+  $("#setup-check-error").hidden = true;
+  updateDiagnosticsControls();
+  try {
+    const result = await api("/api/diagnostics");
+    diagnosticsResult = result;
+    const list = $("#setup-check-results");
+    list.replaceChildren();
+    for (const item of result.checks) {
+      const row = el("div", undefined, "diagnostic-check");
+      row.append(
+        el("h3", `${item.ready ? "Ready" : "Needs attention"} · ${item.name}`),
+        el("p", item.detail),
+      );
+      if (item.action) row.append(el("p", item.action, "help"));
+      const route = {
+        "Model connection": "providers",
+        "Applicant setup": "profile",
+        "Worker history": "today",
+      }[item.name];
+      if (!item.ready && route) {
+        const button = el(
+          "button",
+          "Review " + item.name.toLowerCase(),
+          "secondary",
+        );
+        button.onclick = () => show(route);
+        row.append(button);
+      }
+      list.append(row);
+    }
+    $("#setup-check-status").textContent =
+      `${result.demo ? "Sample workspace · " : ""}Checked ${new Date(result.checked_at).toLocaleString()}. This is a snapshot of your saved setup. ${result.note}`;
+  } catch (error) {
+    $("#setup-check-error").textContent =
+      `Setup check could not finish. ${error.message} Try Check local setup again. Any previous report keeps its original check time.`;
+    $("#setup-check-error").hidden = false;
+  } finally {
+    diagnosticsBusy = false;
+    updateDiagnosticsControls();
+  }
+};
+$("#download-setup-report").onclick = () => {
+  if (!diagnosticsResult || diagnosticsBusy) return;
+  const url = URL.createObjectURL(
+    new Blob([diagnosticsResult.report], { type: "text/plain;charset=utf-8" }),
+  );
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = "application-desk-setup.txt";
+  anchor.click();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+};
 
 function renderSetup() {
   const checks = state.readiness,

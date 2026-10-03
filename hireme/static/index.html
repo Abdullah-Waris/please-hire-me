@@ -150,6 +150,23 @@
             </div>
           </div>
           <div id="machine-checks" class="section"></div>
+          <details class="section" id="setup-diagnostics">
+            <summary>Check local setup and get help</summary>
+            <p class="help">
+              Check your saved setup without sending model requests or
+              applications. Download a report with setup status and next steps;
+              applicant answers and credentials are omitted.
+            </p>
+            <div class="actions">
+              <button id="check-setup">Check local setup</button>
+              <button id="download-setup-report" class="secondary" disabled>
+                Download setup report
+              </button>
+            </div>
+            <p id="setup-check-error" role="alert" hidden></p>
+            <p id="setup-check-status" class="help" role="status"></p>
+            <div id="setup-check-results" class="diagnostic-list"></div>
+          </details>
           <div class="section-head">
             <h2>Your setup checklist</h2>
             <span id="setup-progress-text" class="help"></span>

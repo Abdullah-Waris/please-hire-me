@@ -1690,3 +1690,23 @@ pre {
     justify-self: end;
   }
 }
+
+.diagnostic-list {
+  display: grid;
+  gap: 12px;
+  margin-top: 16px;
+}
+.diagnostic-check {
+  padding: 16px;
+  border: 1px solid var(--rule);
+  border-radius: 12px;
+  background: white;
+  overflow-wrap: anywhere;
+}
+.diagnostic-check h3 {
+  margin: 0 0 8px;
+  font-size: 15px;
+}
+.diagnostic-check p {
+  margin: 8px 0;
+}

@@ -6,8 +6,8 @@ from .setup_status import readiness
 from .recovery import worker_status
 
 
-def diagnose(store, verify=False):
-    checks = readiness(store, verify=verify)
+def diagnose(store, verify=False, *, checks=None):
+    if checks is None: checks = readiness(store, verify=verify)
     items = []
     items.append({'name': 'Operating system', 'ready': checks['supported_platform'],
                   'detail': f"{checks['platform']} · {checks['architecture']} · Python {checks['python']}",
@@ -44,3 +44,20 @@ def format_report(result):
     lines.extend(['', result['note']])
     if not result['verified_login']: lines.append('To check subscription CLI login too, run: hireme doctor --verify-login')
     return '\n'.join(lines)
+
+
+def dashboard_diagnostics(store, *, demo=False):
+    """A dated, read-only report containing fixed setup details, never applicant values."""
+    from .util import now
+    if demo:
+        from .demo import DEMO_READINESS
+        checks = {**DEMO_READINESS, 'missing': store.missing_setup()}
+    else:
+        from .setup_status import browser_available
+        browser_available(store.settings()['browser_channel'], force=True)
+        checks = readiness(store)
+    result = diagnose(store, checks=checks)
+    result['checked_at'] = now()
+    result['demo'] = demo
+    result['report'] = format_report(result) + '\nChecked at: ' + result['checked_at'] + '\n'
+    return result

@@ -1062,6 +1062,8 @@ def test_demo_is_read_only_and_export_requires_auth(tmp_path):
             except OSError: time.sleep(.1)
         try: urllib.request.urlopen(base + '/api/export.csv'); assert False
         except urllib.error.HTTPError as error: assert error.code == 403
+        try: urllib.request.urlopen(base + '/api/diagnostics'); assert False
+        except urllib.error.HTTPError as error: assert error.code == 403
         for endpoint in ('pause', 'resume-worker', 'run', 'discover', 'facts', 'settings', 'complete-setup', 'backup', 'recover', 'answer-revoke', 'schedule-apply', 'company-skip', 'company-allow'):
             request = urllib.request.Request(base + '/api/' + endpoint, data=b'{}', headers={'X-Hireme-Token': 'fixture-capability'})
             try: urllib.request.urlopen(request); assert False
@@ -1083,6 +1085,26 @@ def test_demo_is_read_only_and_export_requires_auth(tmp_path):
                 page.locator('#export-ledger').click()
             assert download.value.suggested_filename == 'application-ledger.csv'
             assert not download.value.failure()
+            page.locator('[data-view=setup]').click()
+            page.locator('#setup-diagnostics').evaluate('(element)=>element.open=true')
+            page.locator('#check-setup').click()
+            expect(page.locator('.diagnostic-check')).to_have_count(6)
+            expect(page.locator('#setup-check-status')).to_contain_text('Sample workspace')
+            with page.expect_download() as report:
+                page.locator('#download-setup-report').click()
+            assert report.value.suggested_filename == 'application-desk-setup.txt'
+            text = Path(report.value.path()).read_text()
+            assert 'Sample workspace' in text and 'Checked at:' in text
+            assert str(root) not in text
+            page.route('**/api/diagnostics', lambda route: route.fulfill(status=503, content_type='application/json', body='{"error":"Synthetic interrupted connection"}'))
+            page.locator('#check-setup').click()
+            expect(page.locator('#setup-check-error')).to_be_visible()
+            expect(page.locator('.diagnostic-check')).to_have_count(6)
+            expect(page.locator('#download-setup-report')).to_be_enabled()
+            page.unroute('**/api/diagnostics')
+            page.locator('#check-setup').click()
+            expect(page.locator('#setup-check-error')).to_be_hidden()
+            expect(page.locator('#check-setup')).to_be_enabled()
             browser.close()
     finally: process.terminate(); process.join(5)
 

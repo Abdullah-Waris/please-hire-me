@@ -124,7 +124,9 @@ If something is missing, run a local check with actionable next steps:
 .venv/bin/python -m hireme doctor --verify-login
 ```
 
-The first checks installed prerequisites and saved setup. The second also checks subscription CLI login. Neither sends model requests or applications. API credentials and model access are checked on the first request. Use `--json` for structured diagnostics. If the dashboard port is already in use, choose another with `hireme dashboard --port 8768 --open`.
+You can also open **Setup checklist → Check local setup and get help** in the dashboard. **Check local setup** refreshes the browser check and shows saved requirements with next steps. **Download setup report** saves a dated text report without applicant answers, credentials or private file paths. The report describes the setup at its check time; run it again after making changes.
+
+The first command checks installed prerequisites and saved setup. The second also checks subscription CLI login. Neither sends model requests or applications. API credentials and model access are checked on the first request. Use `--json` for structured diagnostics. If the dashboard port is already in use, choose another with `hireme dashboard --port 8768 --open`.
 
 ### Model setup
 

@@ -156,6 +156,9 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                         try:running_mode=json.loads(row['detail'] or '{}').get('mode') if row else None
                         except (TypeError,ValueError):pass
                     return self.send(200,{**snapshot,'fact_labels':FACTS,'required':sorted(REQUIRED),'worker_running':activity['running'],'worker_mode':running_mode,'worker_error':local_error})
+                if path=='/api/diagnostics':
+                    from .doctor import dashboard_diagnostics
+                    return self.send(200,dashboard_diagnostics(store,demo=demo))
                 if path=='/api/jobs':
                     from .ledger import search_jobs
                     query=parse_qs(urlsplit(self.path).query)
