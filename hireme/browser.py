@@ -76,6 +76,7 @@ SNAPSHOT=r"""selector => {
  });return out;
 }"""
 CONFIRMED=re.compile(r"thank you for (?:your interest|applying|submitting)|application (?:has been |was )?(?:successfully )?(?:submitted|received)|we (?:have |have successfully )?received your application",re.I)
+REJECTED=re.compile(r"we couldn.t submit your application[\s\S]*your application submission was flagged as possible spam",re.I)
 LOGIN=re.compile(r"sign in to (?:apply|continue)|log in to (?:apply|continue)|create (?:an |your )account|verify your (?:email|identity)|enter (?:the |your )?(?:verification|one.time|security) code",re.I)
 
 
@@ -271,6 +272,7 @@ class Browser:
         deadline=time.monotonic()+45
         while True:
             text=self._guard(job,allow_verification=True)
+            if REJECTED.search(text):return text
             if CONFIRMED.search(text) and not self.page.locator('input[type=email]').count():return text
             if accept_verification and self._email_verification(text):return text
             if self.page.locator('[aria-invalid=true]').count():return text
@@ -577,7 +579,7 @@ class Browser:
                 screenshot=self.store.root/'screenshots'/(self.aid+'-after.jpg')
                 self.page.screenshot(path=str(screenshot),type='jpeg',full_page=True)
                 confirmed=CONFIRMED.search(text) and not self.page.locator('input[type=email]').count()
-                outcome='confirmed' if confirmed else 'awaiting_verification' if self._email_verification(text) else 'unknown'
+                outcome='not_submitted' if REJECTED.search(text) else 'confirmed' if confirmed else 'awaiting_verification' if self._email_verification(text) else 'unknown'
                 evidence=text if outcome=='awaiting_verification' else text[:4000]
                 if outcome=='awaiting_verification':
                     self.store.db.execute('INSERT OR REPLACE INTO verification_challenges VALUES(?,?,?,?,?,?,?,0)',

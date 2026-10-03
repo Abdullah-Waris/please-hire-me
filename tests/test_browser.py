@@ -585,3 +585,17 @@ def test_submission_waits_for_delayed_ats_confirmation(store,ats):
         b.page.evaluate("setTimeout(()=>{document.body.innerHTML='Thank you for applying. Your application has been received.'},2500)")
         text=b._wait_submission_outcome(local_job(store,ats))
         assert 'received' in text
+
+
+def test_explicit_ats_spam_rejection_is_not_uncertain_or_retried(store,ats):
+    with Browser(store,test_url=ats[0]) as b:
+        job=local_job(store,ats)
+        original=b._wait_submission_outcome
+        def rejection(job,accept_verification=True):
+            b.page.set_content("We couldn't submit your application. Your application submission was flagged as possible spam.")
+            return original(job,accept_verification)
+        b._wait_submission_outcome=rejection
+        assert b.apply(job)=='not_submitted'
+        with pytest.raises(Blocked):b.apply(job)
+    app=store.db.execute('SELECT state,confirmation FROM applications').fetchone()
+    assert app['state']=='not_submitted' and 'possible spam' in app['confirmation']

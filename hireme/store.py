@@ -365,7 +365,7 @@ class Store:
             self.event('verification_intent',aid,{})
 
     def finish(self, aid, state, confirmation="", screenshot=""):
-        if state not in ("confirmed","unknown","awaiting_verification"):
+        if state not in ("confirmed","unknown","awaiting_verification","not_submitted"):
             raise ValueError("Invalid outcome")
         with self.transaction():
             r=self.db.execute("SELECT state,job_id FROM applications WHERE id=?",(aid,)).fetchone()
@@ -374,7 +374,7 @@ class Store:
             self.db.execute("UPDATE applications SET state=?,updated=?,confirmation=?,screenshot=? WHERE id=?",
                             (state,now(),confirmation[-4000:],screenshot,aid))
             self.db.execute("UPDATE jobs SET status=?,reason=?,updated=? WHERE id=?",
-                            (state,"" if state=="confirmed" else "Email verification required; application not yet submitted" if state=="awaiting_verification" else "Submission outcome needs reconciliation",now(),r[1]))
+                            (state,"" if state=="confirmed" else "Employer rejected submission; manual action required" if state=='not_submitted' else "Email verification required; application not yet submitted" if state=="awaiting_verification" else "Submission outcome needs reconciliation",now(),r[1]))
             self.db.execute("UPDATE verification_challenges SET state=? WHERE application_id=?",('complete' if state=='confirmed' else 'held' if state=='unknown' else 'pending',aid))
             self.event(state,aid,{"confirmation":confirmation[-4000:],"screenshot":screenshot})
 
