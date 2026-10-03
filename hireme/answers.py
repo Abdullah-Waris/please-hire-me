@@ -46,6 +46,7 @@ def field_key(label):
     if 'highest' in label and re.search(r'education|degree',label):return 'highest_completed_degree'
     if re.search(r'(?:will|do).*(?:require|need).*sponsor|(?:require|need).*employment visa',label):return 'needs_sponsorship'
     if re.search(r'(?:authorized|eligible|authorization).*(?:united states|u\.s\.|\bus\b)',label):return 'work_authorized_us'
+    if re.search(r'currently located.*(?:office|on.site|in.person)',label):return None
     if re.search(r'(?:open|willing|comfortable).*(?:in.person|on.site|in office)|^i understand that this position requires me to work on.site|(?:can|able to).*work (?:from|at|in).*(?:office|headquarters|\bhq\b)',label):return 'onsite'
     return None
 
@@ -143,6 +144,11 @@ def _context_preference(store, label, options, context):
         index=1 if 'second choice' in low else 0
         if len(scores)>index:
             value=scores[index][1];evidence={'skills_revision':facts['skills']['revision'],'rank':index+1}
+    elif re.search(r'currently located.*(?:bay area|san francisco).*(?:office|in.person)',low):
+        location=facts.get('location',{})
+        if facts.get('onsite',{}).get('value')=='Yes' and re.search(r'\b(?:Berkeley|San Francisco|Bay Area)\b',location.get('value',''),re.I):
+            yes=[x for x in options if re.match(r'^yes\b',x,re.I)]
+            if len(yes)==1:value=yes[0];evidence={'location_revision':location['revision'],'onsite_revision':facts['onsite']['revision']}
     elif re.search(r'(?:require|need).*relocation.*(?:sf|san francisco|bay area)',low):
         location=facts.get('location',{})
         if re.search(r'\b(?:Berkeley|San Francisco|Bay Area)\b',location.get('value',''),re.I):

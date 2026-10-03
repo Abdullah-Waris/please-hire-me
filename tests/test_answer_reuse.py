@@ -305,6 +305,16 @@ def test_current_location_wording_uses_verified_geographic_option(store,job):
     assert resolve(store,job['host'],question,context=job)['value']=='Berkeley, California, United States'
 
 
+def test_combined_bay_area_and_onsite_question_needs_both_facts(store,job):
+    store.update_settings({'contextual_preferences':True})
+    store.put_facts({'location':'Berkeley, CA','onsite':'Yes'})
+    options=["Yes, I'm currently located in the Bay Area and am open to work 5 days a week in-office", "No, but I'm planning to relocate to the Bay Area", "No, but I'm open to relocating to the Bay Area", "No, and I am not open to relocation"]
+    question=field('Are you currently located in the San Francisco Bay Area and able to work from our office 5 days per week?','radio',options)
+    assert resolve(store,job['host'],question,context=job)['value']==options[0]
+    store.put_facts({'location':'Boston, MA'})
+    with pytest.raises(Blocked):resolve(store,job['host'],question,context=job)
+
+
 def test_tailored_answers_can_use_resume_without_separate_templates_and_revalidate_hash(store,job):
     from reportlab.pdfgen import canvas
     import io,hashlib
