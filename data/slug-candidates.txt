@@ -7,7 +7,7 @@
 # Every ATS org slug this project has tried, live or dead. One per line.
 # Greenhouse and Lever. 15 came back live; listenlabs and column produced submissions.
 # dead-slug re-probe. 1,158 generated slugs -> 11 live; 2,940 recorded-dead slugs -> 65 live.
-# scripts/probe_boards.sh probes this list and rewrites data/boards.md.
+# scripts/probe_boards.sh discovers candidates from these slugs into the private ledger; it does not rewrite boards.md.
 # were already in this list and return empty; the hyphenated forms are live. Always add both.
 0x
 100ms

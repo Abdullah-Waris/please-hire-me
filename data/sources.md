@@ -6,7 +6,7 @@ your own cycle, visa status, and target list in `config/settings.json`.
 ## How to use this file
 
 A **source** finds openings. It is never where you apply. Mine a source, then apply on the company's
-own ATS (Greenhouse / Lever / Ashby) per `config/spec.md`. Never apply through Handshake, LinkedIn
+own ATS (Greenhouse / Lever / Ashby) per `docs/worker-contract.md`. Never apply through Handshake, LinkedIn
 Easy Apply, or Simplify.
 
 **Cycle:** mine the list that matches your graduation, and the one on either side of it. A December
@@ -221,7 +221,7 @@ Large companies gate new-grad roles behind a university page separate from the m
 
 ---
 
-## Standing rules (from `config/spec.md`)
+## Standing rules (from `docs/worker-contract.md`)
 
 1. Apply only on the company's own ATS. Sources above are for finding roles, never for applying.
 2. Never Handshake, LinkedIn Easy Apply, or Simplify as an application channel.

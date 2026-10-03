@@ -156,7 +156,7 @@ Generated cover letters use reviewed factual sources and writing style in a fixe
 ## Development
 
 ```bash
-.venv/bin/python -m pip install -r requirements.lock
+.venv/bin/python -m pip install -r requirements/development.lock
 .venv/bin/python -m pip install --no-deps -e .
 .venv/bin/python -m playwright install chromium
 .venv/bin/python -m pytest -q
@@ -166,3 +166,5 @@ node --check hireme/static/app.js
 Tests use synthetic local ATS/mail fixtures. They cover provenance, revisions, scoped answers, upload validation, submission states, pause/recovery, budgets, provider boundaries, private dashboard access, backup/restore and service generation. They do not prove real employer acceptance, actual CLI inference for every version/model, Gmail delivery, or Pi hardware operation. See [architecture](docs/architecture.md).
 
 MIT. Original source attribution is preserved in [LICENSE](LICENSE). Never commit personal files or credentials.
+
+See the [documentation map](docs/README.md) for the source layout, current references, and archived material.

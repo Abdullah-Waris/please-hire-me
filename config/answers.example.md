@@ -1,6 +1,6 @@
 # Approved answer library
 
-Save these through Your facts in the local dashboard. Every submitted sentence is verbatim approved wording; Claude may select a template but cannot add details.
+Save these through Your facts in the local dashboard. Default answers reuse approved wording. With tailored writing enabled, the selected model may adapt it using reviewed personal sources and a separate support check. Style examples and background research do not establish personal qualifications.
 
 - Motivation: your truthful reason for doing this kind of work, without naming the prospective employer.
 - Project: a project, your exact role, technologies and verified results.

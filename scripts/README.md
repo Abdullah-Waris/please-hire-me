@@ -5,3 +5,5 @@
 `ashby_form_fields.sh` validates slugs and uses structured GraphQL JSON. `probe_boards.sh` discovers into the ledger; `render_boards.py` prints source health. `tracker_companies.py PATH` extracts explicit wikilinks. The HN helper remains a public read-only research tool.
 
 The old Gmail broker, resume HTTP server and unrestricted Claude launcher are disabled. There is no arbitrary post-run script integration.
+
+Retired helper placeholders have moved to [docs/archive](../docs/archive/README.md) as non-executable text. Existing managed-worker wrappers remain at their original paths for compatibility.

@@ -1,15 +1,13 @@
-# data/
+# Discovery seeds and public research
 
-| File | What | Tracked? |
-|---|---|---|
-| `queue.md` | The working checklist: vetted targets, already-applied tracker, skip reasons. | no (yours) |
-| `sources.md` | Where to find more roles: job lists, AI labs, quant firms, fellowships, VC boards, timing calendar. Refill the queue from here. | yes |
-| `resume.pdf` | Your resume. The path is set in `config/profile.json`. | no (yours) |
-| `transcript.pdf` | Optional. Some quant and campus forms require it. | no (yours) |
-| `boards.md` | Every ATS org slug verified live, with job counts and the date checked. The fastest place to start sourcing. | yes |
-| `ats-field-notes.md` | Per-candidate application limits, seniority gates that hide in body text, slug traps, prompt-injection canaries. | yes |
-| `slug-candidates.txt` | Every ATS org slug ever tried, live or dead. Input to the probe script. | yes |
-| `queue.example.md` | The queue format, with a worked example. | yes |
+| File | Current use |
+| --- | --- |
+| `boards.md` | Runtime ATS slug seeds from a historical public board snapshot. Counts and availability can be stale. |
+| `slug-candidates.txt` | Runtime slug candidates, including dead/unknown boards. Discovery records current source health in the ledger. |
+| `sources.md` | Public research and sourcing ideas; not application eligibility policy. |
+| `ats-field-notes.md` | Historical observations about forms and eligibility. Consult executable adapters and current postings before relying on them. |
+| `queue.example.md` | Legacy Markdown checklist reference. The managed worker uses SQLite rather than this queue. |
 
-A source finds openings. It is never where you apply. Mine a source, then apply on the company's
-own ATS.
+Applicant resumes, transcripts, working queues and other personal files are ignored by Git. New uploads belong in the dashboard and are copied to `~/.local/share/please-hire-me/`, not this tracked data directory. Older ignored files in this checkout are retained for migration, not treated as current authority.
+
+Discovery finds openings; submissions go to approved employer ATS destinations. `scripts/probe_boards.sh` writes discovery results to the private ledger and does not rewrite these tracked research files.
