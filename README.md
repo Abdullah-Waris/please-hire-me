@@ -233,7 +233,9 @@ Backup validation checks readable application packages as well as current docume
 
 Backups use SQLite’s backup API, include documents/history/evidence, verify checksums on restore, and restore **paused**. They exclude integration credentials, account keys and browser sessions: reconnect those on the destination. The archive contains personal information and is **not encrypted**; store it securely. SD cards can fail; keep an off-device copy and test a restore.
 
-If the worker created employer accounts, transfer their generated passwords separately:
+If the worker created employer accounts, transfer their generated passwords separately. In **Needs you → Move employer passwords to another computer**, pause submissions, choose and repeat a transfer passphrase, then select **Download encrypted passwords**. On the destination, restore matching history first, pause that workspace and use **Import encrypted passwords** with the saved file and passphrase. Fields clear after each request; password transfers preserve verification states and do not enable submissions.
+
+The terminal workflow remains available:
 
 ```bash
 # Source instance: pause and export using a NEW filename outside the repository.

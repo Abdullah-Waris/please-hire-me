@@ -690,6 +690,76 @@
               </button>
             </div>
           </div>
+          <details id="account-transfer-panel" class="section">
+            <summary>Move employer passwords to another computer</summary>
+            <p class="help">
+              Your history backup keeps account records, but excludes passwords.
+              Use a separate encrypted transfer to recover existing employer
+              passwords after restoring matching history on your other computer
+              or Pi. Both workspaces must use the same confirmed applicant email
+              and stay paused.
+            </p>
+            <p id="account-transfer-readiness" class="help"></p>
+            <div class="account-transfer-grid">
+              <form id="account-export-form" method="post">
+                <h3>1. Export from this computer</h3>
+                <label
+                  >New transfer passphrase<input
+                    name="passphrase"
+                    type="password"
+                    autocomplete="new-password"
+                    minlength="12"
+                    maxlength="1024"
+                    required
+                /></label>
+                <label
+                  >Repeat transfer passphrase<input
+                    name="confirmation"
+                    type="password"
+                    autocomplete="new-password"
+                    minlength="12"
+                    maxlength="1024"
+                    required
+                /></label>
+                <p class="help">
+                  Use at least 12 characters. Keep this passphrase separately;
+                  it is required to unlock the transfer.
+                </p>
+                <button type="submit" disabled>
+                  Download encrypted passwords
+                </button>
+                <p id="account-export-feedback" class="help" role="status"></p>
+              </form>
+              <form id="account-import-form" method="post">
+                <h3>2. Import on the other computer</h3>
+                <label
+                  >Encrypted credential transfer<input
+                    name="archive"
+                    type="file"
+                    accept=".encrypted,application/json"
+                    required
+                /></label>
+                <label
+                  >Transfer passphrase<input
+                    name="passphrase"
+                    type="password"
+                    autocomplete="off"
+                    minlength="12"
+                    maxlength="1024"
+                    required
+                /></label>
+                <p class="help">
+                  Restore the matching history backup first. Existing different
+                  passwords are rejected. Account uncertainty stays recorded;
+                  importing keeps submissions paused.
+                </p>
+                <button type="submit" disabled>
+                  Import encrypted passwords
+                </button>
+                <p id="account-import-feedback" class="help" role="status"></p>
+              </form>
+            </div>
+          </details>
         </section>
         <section id="profile" class="view" hidden>
           <div class="section">

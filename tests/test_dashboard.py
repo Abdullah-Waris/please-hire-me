@@ -1089,7 +1089,7 @@ def test_demo_is_read_only_and_export_requires_auth(tmp_path):
         except urllib.error.HTTPError as error: assert error.code == 403
         try: urllib.request.urlopen(base + '/api/diagnostics'); assert False
         except urllib.error.HTTPError as error: assert error.code == 403
-        for endpoint in ('pause', 'resume-worker', 'run', 'discover', 'facts', 'settings', 'complete-setup', 'backup', 'recover', 'answer-revoke', 'schedule-apply', 'company-skip', 'company-allow'):
+        for endpoint in ('pause', 'resume-worker', 'run', 'discover', 'facts', 'settings', 'complete-setup', 'backup', 'recover', 'answer-revoke', 'schedule-apply', 'company-skip', 'company-allow', 'account-vault-export', 'account-vault-import'):
             request = urllib.request.Request(base + '/api/' + endpoint, data=b'{}', headers={'X-Hireme-Token': 'fixture-capability'})
             try: urllib.request.urlopen(request); assert False
             except urllib.error.HTTPError as error:
@@ -1899,6 +1899,72 @@ def test_selected_resume_and_transcript_downloads_preserve_fact_drafts_and_follo
             expect(draft).to_have_value('Synthetic unsaved name')
             withdrawn=page.request.get(base+f"/api/selected-document/transcript/{doc['hash']}",headers={'X-Hireme-Token':'fixture-capability'})
             assert withdrawn.status==400 and (store.root/'documents'/doc['filename']).read_bytes()==expected
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            browser.close()
+    finally: process.terminate(); process.join(5)
+
+
+def test_dashboard_encrypted_password_transfer_auth_pause_retry_and_secret_cleanup(store):
+    from hireme.accounts import AccountVault
+    from playwright.sync_api import sync_playwright,expect
+    vault=AccountVault(store); origin='https://careers.example.com'; company='Synthetic Employer'
+    credential=vault.credentials(origin,company,create=True); key=vault.begin_creation(origin,company); vault.finish_creation(key,confirmed=False)
+    store.update_settings({'live_enabled':False})
+    phrase='synthetic dashboard transfer phrase only'
+    before=store.snapshot()
+    sock=socket.socket(); sock.bind(('127.0.0.1',0)); port=sock.getsockname()[1]; sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port)); process.start()
+    base=f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch(); page=browser.new_page(viewport={'width':320,'height':844},accept_downloads=True)
+            assert page.request.post(base+'/api/account-vault-export',data={'passphrase':phrase,'confirmation':phrase}).status==403
+            store.update_settings({'live_enabled':True})
+            live=page.request.post(base+'/api/account-vault-export',data={'passphrase':phrase,'confirmation':phrase},headers={'X-Hireme-Token':'fixture-capability'})
+            assert live.status==400 and 'Pause' in live.text() and phrase not in live.text()
+            store.update_settings({'live_enabled':False})
+            page.goto(base+'/#token=fixture-capability'); page.locator('[data-view=questions]').click()
+            page.locator('#account-transfer-panel').evaluate('(element)=>element.open=true')
+            export=page.locator('#account-export-form')
+            export.locator('[name=passphrase]').fill(phrase); export.locator('[name=confirmation]').fill('different synthetic transfer phrase')
+            export.locator('button').click(); expect(page.locator('#account-export-feedback')).to_contain_text('must match')
+            assert not store.db.execute("SELECT * FROM events WHERE kind='account_credentials_exported'").fetchone()
+            export.locator('[name=confirmation]').fill(phrase)
+            pending=[]
+            page.route('**/api/account-vault-export',lambda route:pending.append(route))
+            with page.expect_request('**/api/account-vault-export'): export.locator('button').click()
+            expect(page.locator('#worker-state')).to_contain_text('Moving encrypted employer passwords')
+            expect(page.locator('#pause')).to_be_disabled(); expect(page.locator('#prepare')).to_be_disabled()
+            expect(export.locator('[name=passphrase]')).to_be_disabled()
+            pending[0].abort()
+            expect(page.locator('#account-export-feedback')).to_contain_text('Cannot reach your application desk')
+            expect(export.locator('[name=passphrase]')).to_have_value('')
+            expect(export.locator('[name=confirmation]')).to_have_value('')
+            page.unroute('**/api/account-vault-export')
+            export.locator('[name=passphrase]').fill(phrase); export.locator('[name=confirmation]').fill(phrase)
+            with page.expect_download() as download: export.locator('button').click()
+            assert download.value.suggested_filename=='account-credentials.encrypted'
+            data=Path(download.value.path()).read_bytes()
+            assert credential['password'].encode() not in data and phrase.encode() not in data
+            expect(export.locator('[name=passphrase]')).to_have_value(''); expect(export.locator('[name=confirmation]')).to_have_value('')
+            importing=page.locator('#account-import-form')
+            importing.locator('[name=archive]').set_input_files({'name':'accounts.encrypted','mimeType':'application/json','buffer':data})
+            importing.locator('[name=passphrase]').fill('wrong synthetic transfer phrase')
+            importing.locator('button').click(); expect(page.locator('#account-import-feedback')).to_contain_text('incorrect passphrase')
+            expect(importing.locator('[name=passphrase]')).to_have_value('')
+            importing.locator('[name=archive]').set_input_files({'name':'accounts.encrypted','mimeType':'application/json','buffer':data})
+            importing.locator('[name=passphrase]').fill(phrase); importing.locator('button').click()
+            expect(page.locator('#account-import-feedback')).to_contain_text('1 employer account recovered')
+            expect(importing.locator('[name=passphrase]')).to_have_value('')
+            assert AccountVault(store).credentials(origin,company)==credential
+            assert store.db.execute('SELECT state FROM employer_accounts WHERE id=?',(key,)).fetchone()[0]=='uncertain'
+            assert not store.settings()['live_enabled'] and store.snapshot()==before
+            assert phrase not in str([dict(row) for row in store.db.execute('SELECT * FROM events')])
+            assert credential['password'] not in str([dict(row) for row in store.db.execute('SELECT * FROM events')])
+            assert not list(store.root.glob('.account-transfer-*'))
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             browser.close()
     finally: process.terminate(); process.join(5)

@@ -16,6 +16,7 @@ let state = null,
   view = "today";
 let refreshing = null;
 let backupBusy = false;
+let accountTransferBusy = false;
 let transcriptWithdrawalBusy = false;
 const selectedDownloadBusy = new Set();
 const selectedDownloadHashes = {};
@@ -78,6 +79,41 @@ function saved(form) {
     const indicator = document.querySelector(`[data-draft-for="${form.id}"]`);
     if (indicator) indicator.textContent = "";
   }
+}
+
+function updateAccountTransferControls() {
+  if (!state) return;
+  const hasEmail = state.facts.email?.confirmed && state.facts.email.value,
+    hasHistory = state.employer_accounts.length > 0;
+  const ready =
+    !state.demo &&
+    !state.settings.live_enabled &&
+    !state.worker_running &&
+    hasEmail &&
+    hasHistory;
+  for (const form of [$("#account-export-form"), $("#account-import-form")]) {
+    form.querySelector("button").disabled = accountTransferBusy || !ready;
+    for (const input of form.querySelectorAll("input"))
+      input.disabled = accountTransferBusy || state.demo;
+  }
+  const message = state.demo
+    ? "Encrypted password transfers are available in your own workspace."
+    : accountTransferBusy
+      ? "Processing the encrypted transfer. No account verification or submission settings will change."
+      : state.worker_running || state.settings.live_enabled
+        ? "Pause submissions and wait for active work to finish before transferring passwords."
+        : !hasEmail
+          ? "Confirm your applicant email in Your facts first."
+          : !hasHistory
+            ? "No employer account history is saved here. Restore matching history before importing passwords."
+            : "Ready for an encrypted transfer. Submissions are paused.";
+  if ($("#account-transfer-readiness").textContent !== message)
+    $("#account-transfer-readiness").textContent = message;
+}
+function transferFeedback(id, message, error = false) {
+  const feedback = $(id);
+  feedback.textContent = message;
+  feedback.setAttribute("role", error ? "alert" : "status");
 }
 
 function renderAccounts() {
@@ -221,6 +257,118 @@ async function api(path, data, raw = false, extraHeaders = {}) {
   if (forms[path]) saved($(forms[path]));
   return value;
 }
+$("#account-export-form").onsubmit = async (event) => {
+  event.preventDefault();
+  if (!state)
+    return transferFeedback(
+      "#account-export-feedback",
+      "Wait for the local desk to finish loading, then try again.",
+      true,
+    );
+  const form = event.target,
+    passphrase = form.elements.passphrase.value,
+    confirmation = form.elements.confirmation.value;
+  if (passphrase !== confirmation)
+    return transferFeedback(
+      "#account-export-feedback",
+      "The transfer passphrases must match.",
+      true,
+    );
+  if (accountTransferBusy) return;
+  accountTransferBusy = true;
+  render();
+  transferFeedback(
+    "#account-export-feedback",
+    "Encrypting your existing employer passwords…",
+  );
+  try {
+    const response = await fetch("/api/account-vault-export", {
+      method: "POST",
+      headers: { "Content-Type": "application/json", "X-Hireme-Token": token },
+      body: JSON.stringify({ passphrase, confirmation }),
+    }).catch(() => {
+      throw new Error(
+        "Cannot reach your application desk. Check that the dashboard is running and try again.",
+      );
+    });
+    if (!response.ok) {
+      const data = await response.json().catch(() => null);
+      throw new Error(data?.error || "Encrypted export could not finish.");
+    }
+    if (
+      response.headers.get("Content-Type")?.split(";")[0] !==
+      "application/octet-stream"
+    )
+      throw new Error(
+        "The server did not return an encrypted transfer. Reconnect and try again.",
+      );
+    const url = URL.createObjectURL(await response.blob()),
+      anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = "account-credentials.encrypted";
+    anchor.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    transferFeedback(
+      "#account-export-feedback",
+      "Encrypted transfer downloaded. Keep the passphrase separately. Restore matching history on the destination before importing this file.",
+    );
+  } catch (error) {
+    transferFeedback("#account-export-feedback", error.message, true);
+  } finally {
+    form.reset();
+    saved(form);
+    accountTransferBusy = false;
+    render();
+  }
+};
+$("#account-import-form").onsubmit = async (event) => {
+  event.preventDefault();
+  if (!state)
+    return transferFeedback(
+      "#account-import-feedback",
+      "Wait for the local desk to finish loading, then try again.",
+      true,
+    );
+  const form = event.target,
+    file = form.elements.archive.files[0],
+    passphrase = form.elements.passphrase.value;
+  if (!file || accountTransferBusy) return;
+  if (!file.size || file.size > 2 * 1024 * 1024)
+    return transferFeedback(
+      "#account-import-feedback",
+      "Choose an encrypted credential transfer up to 2 MiB.",
+      true,
+    );
+  accountTransferBusy = true;
+  render();
+  transferFeedback(
+    "#account-import-feedback",
+    "Checking the encrypted transfer and matching account history…",
+  );
+  try {
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    let binary = "";
+    for (let offset = 0; offset < bytes.length; offset += 32768)
+      binary += String.fromCharCode(...bytes.subarray(offset, offset + 32768));
+    const result = await api("/api/account-vault-import", {
+      archive: btoa(binary),
+      passphrase,
+    });
+    await refresh();
+    transferFeedback(
+      "#account-import-feedback",
+      `${result.accounts} employer account${result.accounts === 1 ? "" : "s"} recovered. Existing account verification states are unchanged. Submissions remain paused.`,
+    );
+  } catch (error) {
+    transferFeedback("#account-import-feedback", error.message, true);
+  } finally {
+    form.reset();
+    saved(form);
+    accountTransferBusy = false;
+    render();
+  }
+};
+
 function show(name) {
   view = name;
   if (name === "settings" && state && !scheduleLoaded) loadSchedule();
@@ -2101,21 +2249,24 @@ function render() {
     (state.settings.onboarding_complete && !state.missing_setup.length);
   $("#worker-state").textContent = state.demo
     ? "Read-only sample workspace"
-    : state.worker_running
-      ? state.worker_mode === "discovery"
-        ? "Finding opportunities…"
-        : state.worker_mode === "prepare"
-          ? "Preparing applications…"
-          : state.settings.live_enabled
-            ? "Batch running"
-            : "Pausing active batch…"
-      : state.worker_recovery?.recovery_needed
-        ? "Recovery needed"
-        : !state.settings.onboarding_complete || state.missing_setup.length > 0
-          ? "Setup needed"
-          : state.settings.live_enabled
-            ? "Automatic submissions enabled"
-            : "Submissions paused";
+    : accountTransferBusy
+      ? "Moving encrypted employer passwords…"
+      : state.worker_running
+        ? state.worker_mode === "discovery"
+          ? "Finding opportunities…"
+          : state.worker_mode === "prepare"
+            ? "Preparing applications…"
+            : state.settings.live_enabled
+              ? "Batch running"
+              : "Pausing active batch…"
+        : state.worker_recovery?.recovery_needed
+          ? "Recovery needed"
+          : !state.settings.onboarding_complete ||
+              state.missing_setup.length > 0
+            ? "Setup needed"
+            : state.settings.live_enabled
+              ? "Automatic submissions enabled"
+              : "Submissions paused";
   const finding = state.worker_running && state.worker_mode === "discovery";
   const preparing = state.worker_running && state.worker_mode === "prepare";
   $("#pause").textContent = finding
@@ -2127,16 +2278,19 @@ function render() {
         : "Resume";
   $("#pause").disabled =
     state.demo ||
+    (accountTransferBusy && !state.settings.live_enabled) ||
     (!finding &&
       !preparing &&
       !state.settings.live_enabled &&
       (!state.settings.onboarding_complete || state.missing_setup.length > 0));
   $("#discover").disabled =
     state.demo ||
+    accountTransferBusy ||
     state.worker_running ||
     state.worker_recovery?.recovery_needed;
   $("#run").disabled =
     state.demo ||
+    accountTransferBusy ||
     state.worker_recovery?.recovery_needed ||
     state.worker_running ||
     !state.settings.onboarding_complete ||
@@ -2144,6 +2298,7 @@ function render() {
     state.missing_setup.length > 0;
   $("#prepare").disabled =
     state.demo ||
+    accountTransferBusy ||
     state.worker_running ||
     state.worker_recovery?.recovery_needed ||
     !state.settings.onboarding_complete ||
@@ -2180,6 +2335,7 @@ function render() {
   renderSetup();
   renderQuestions();
   renderAccounts();
+  updateAccountTransferControls();
   renderTemplates();
   renderMaterials();
   renderMail();

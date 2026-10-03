@@ -1753,3 +1753,26 @@ pre {
 .recorded-document p {
   margin: 6px 0;
 }
+
+.account-transfer-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  margin-top: 18px;
+}
+.account-transfer-grid form {
+  min-width: 0;
+}
+.account-transfer-grid input {
+  width: 100%;
+  min-width: 0;
+}
+.account-transfer-grid button {
+  max-width: 100%;
+  white-space: normal;
+}
+@media (max-width: 700px) {
+  .account-transfer-grid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}

@@ -272,7 +272,16 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                         result=import_material(store,raw,unquote(self.headers.get('X-Upload-Name','')),self.headers.get('X-Material-Kind',''))
                         return self.send(200,result)
                     data=json.loads(raw)
-                    if path=='/api/provider-key':
+                    if path=='/api/account-vault-export':
+                        from .account_transfer_web import export_payload
+                        if not isinstance(data,dict):raise ValueError('Provide a transfer passphrase and confirmation')
+                        payload=export_payload(store,data.get('passphrase'),data.get('confirmation'))
+                        return self.send(200,payload,'application/octet-stream',download='account-credentials.encrypted')
+                    if path=='/api/account-vault-import':
+                        from .account_transfer_web import import_payload
+                        if not isinstance(data,dict):raise ValueError('Provide an encrypted transfer and passphrase')
+                        result=import_payload(store,data.get('archive'),data.get('passphrase'))
+                    elif path=='/api/provider-key':
                         from .connections import save_key
                         save_key(store,data['provider'],data['key']);result={'saved':True}
                     elif path=='/api/provider-check':
