@@ -81,6 +81,64 @@ def test_find_opportunities_and_stop_without_enabling_submissions(tmp_path):
         process.terminate(); process.join(5)
 
 
+def test_question_pages_keep_old_employer_context_and_protect_unsaved_answers(store, job):
+    from playwright.sync_api import sync_playwright, expect
+    from hireme.util import digest
+    special = store.ask(job['id'], job['host'], 'Café 100%_ question', [])
+    for index in range(30): store.ask(job['id'], job['host'], f'Core prompt {index}', [])
+    for index in range(501):
+        extra = {**job, 'id': digest(f'question-job-{index}'), 'url': job['url'] + f'-{index}', 'company': f'Other employer {index}'}
+        store.upsert_job(extra); store.db.execute('UPDATE jobs SET score=100 WHERE id=?', (extra['id'],))
+        store.ask(extra['id'], extra['host'], f'Aux prompt {index}', [])
+    bad = store.ask(job['id'], job['host'], 'BadChoices', [])
+    store.db.execute('UPDATE questions SET options=? WHERE id=?', ('not json', bad))
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 320, 'height': 844}); errors = []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(base + '/#token=fixture-capability'); page.locator('[data-view=questions]').click()
+            expect(page.locator('#question-list form')).to_have_count(25)
+            expect(page.locator('#question-page')).to_contain_text('1–25 of 533')
+            snapshot = page.request.get(base + '/api/state', headers={'X-Hireme-Token': 'fixture-capability'}).json()
+            assert len(snapshot['questions']) == 50 and snapshot['summary']['question_count'] == 533
+            assert job['id'] not in {row['id'] for row in snapshot['jobs']}
+            assert page.request.get(base + '/api/questions').status == 403
+            expect(page.locator('#question-list')).to_contain_text('Acme')
+            field = page.locator('#question-list textarea').first
+            field.fill('Unfinished synthetic answer'); field.blur(); page.evaluate('refresh()')
+            expect(field).to_have_value('Unfinished synthetic answer')
+            expect(page.locator('#question-search')).to_be_disabled(); expect(page.locator('#question-next')).to_be_disabled()
+            page.locator('#question-list [data-question-discard]').first.click()
+            expect(page.locator('#question-next')).to_be_enabled()
+            page.route('**/api/questions*', lambda route: route.fulfill(status=503, json={'error': 'Synthetic temporary failure'}))
+            page.locator('#question-search').fill('Core prompt')
+            expect(page.locator('#question-error')).to_contain_text('Synthetic temporary failure')
+            page.unroute('**/api/questions*'); page.locator('#question-retry').click()
+            expect(page.locator('#question-page')).to_contain_text('1–25 of 30')
+            page.locator('#question-next').click()
+            expect(page.locator('#question-page')).to_contain_text('26–30 of 30')
+            expect(page.locator('#question-list')).to_be_focused()
+            page.locator('#question-search').fill('CAFÉ 100%_')
+            expect(page.locator('#question-list form')).to_have_count(1)
+            expect(page.locator('#question-list')).to_contain_text('Acme')
+            page.locator('#question-list textarea').fill('Synthetic confirmed response')
+            page.locator('#question-list button[type=submit], #question-list button:not([type])').click()
+            expect(page.locator('#question-page')).to_contain_text('0 unanswered questions')
+            assert store.saved_answer(job['host'], 'Café 100%_ question', [])['value'] == 'Synthetic confirmed response'
+            page.locator('#question-search').fill('BadChoices')
+            expect(page.locator('#question-list')).to_contain_text('invalid choices')
+            expect(page.locator('#question-list form')).to_have_count(0)
+            assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            browser.close()
+    finally: process.terminate(); process.join(5)
+
+
 def test_dashboard_capability_csrf_host_and_xss(tmp_path):
     sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
     process=multiprocessing.Process(target=launch,args=(str(tmp_path/'private'),str(Path(__file__).parent.parent),port))

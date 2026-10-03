@@ -349,7 +349,53 @@
             wording and options. Account and CAPTCHA blocks link straight to the
             job. The worker continues with other opportunities.
           </p>
-          <div id="question-list"></div>
+          <label
+            >Search question, employer or role<input
+              id="question-search"
+              type="search"
+              maxlength="200"
+              autocomplete="off"
+          /></label>
+          <p id="question-draft-help" class="help" hidden>
+            Save or discard your unfinished answers before searching or changing
+            question pages.
+          </p>
+          <p id="question-error" class="help" role="alert" hidden></p>
+          <button id="question-retry" type="button" class="secondary" hidden>
+            Retry questions
+          </button>
+          <div
+            id="question-list"
+            tabindex="-1"
+            role="region"
+            aria-label="Unanswered questions"
+          ></div>
+          <div class="ledger-pagination">
+            <span
+              id="question-page"
+              class="help"
+              role="status"
+              aria-live="polite"
+            ></span>
+            <div class="actions">
+              <button
+                id="question-previous"
+                type="button"
+                class="secondary"
+                disabled
+              >
+                Previous questions
+              </button>
+              <button
+                id="question-next"
+                type="button"
+                class="secondary"
+                disabled
+              >
+                Next questions
+              </button>
+            </div>
+          </div>
           <h2 class="section">Applications that need a hand</h2>
           <div id="blocked-jobs"></div>
           <h2 class="section">Uncertain submissions</h2>

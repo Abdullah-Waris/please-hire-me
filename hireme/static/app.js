@@ -14,6 +14,12 @@ let refreshing = null;
 let backupBusy = false;
 let renderedAccountSignature = null;
 let aliasJsonMode = false;
+let questionState = null,
+  questionOffset = 0,
+  questionBusy = false,
+  questionRequest = 0,
+  questionTimer,
+  renderedQuestionSignature = null;
 let accountState = null,
   accountOffset = 0,
   accountBusy = false,
@@ -189,7 +195,10 @@ async function api(path, data, raw = false, extraHeaders = {}) {
 function show(name) {
   view = name;
   if (name === "settings" && state && !scheduleLoaded) loadSchedule();
-  if (name === "questions" && state) loadAccountLedger();
+  if (name === "questions" && state) {
+    loadAccountLedger();
+    loadQuestionLedger();
+  }
   $("#page-eyebrow").textContent = {
     setup: "YOUR NEXT CHAPTER",
     today: "YOUR SEARCH, IN MOTION",
@@ -689,28 +698,133 @@ function renderOverview(submitted) {
     .toUpperCase();
   $("#question-count").textContent = count ? String(count) : "";
 }
-function renderQuestions() {
+function questionDrafts() {
+  return [...document.querySelectorAll("#question-list form")].filter((form) =>
+    dirtyForms.has(form),
+  );
+}
+function updateQuestionControls() {
+  const draft = questionDrafts().length > 0;
+  $("#question-search").disabled = draft;
+  $("#question-retry").disabled = draft || questionBusy;
+  $("#question-previous").disabled =
+    draft || questionBusy || !questionState || questionState.offset === 0;
+  $("#question-next").disabled =
+    draft ||
+    questionBusy ||
+    !questionState ||
+    questionState.offset + questionState.limit >= questionState.total;
+  $("#question-draft-help").hidden = !draft;
+  for (const form of document.querySelectorAll("#question-list form"))
+    form.querySelector("[data-question-discard]").hidden =
+      !dirtyForms.has(form);
+  $("#question-page").textContent = questionState
+    ? questionState.total
+      ? questionState.questions.length
+        ? `${questionState.offset + 1}–${Math.min(questionState.offset + questionState.limit, questionState.total)} of ${questionState.total} unanswered questions`
+        : "Refreshing question page…"
+      : "0 unanswered questions"
+    : "Loading questions…";
+}
+async function loadQuestionLedger(reset = false, focus = false) {
+  if (!state || questionBusy || questionDrafts().length) return;
+  if (reset) questionOffset = 0;
+  questionBusy = true;
+  updateQuestionControls();
+  const request = ++questionRequest;
+  const parent = $("#question-list");
+  parent.setAttribute("aria-busy", "true");
+  try {
+    const result = await api(
+      `/api/questions?${new URLSearchParams({ search: $("#question-search").value, offset: questionOffset })}`,
+    );
+    if (request !== questionRequest) return;
+    questionState = result;
+    questionOffset = result.offset;
+    $("#question-error").hidden = true;
+    $("#question-retry").hidden = true;
+    renderQuestionList();
+    if (focus) {
+      parent.focus();
+      parent.scrollIntoView({ block: "start", behavior: "auto" });
+    }
+  } catch (error) {
+    $("#question-error").textContent =
+      `Could not load questions: ${error.message}`;
+    $("#question-error").hidden = false;
+    $("#question-retry").hidden = false;
+  } finally {
+    questionBusy = false;
+    parent.removeAttribute("aria-busy");
+    updateQuestionControls();
+    if (request !== questionRequest && !questionDrafts().length)
+      loadQuestionLedger(true);
+  }
+}
+function renderQuestionList() {
   if (
-    [...document.querySelectorAll("#questions form")].some(
+    [...document.querySelectorAll("#question-list form")].some(
       (form) => dirtyForms.has(form) || form.contains(document.activeElement),
     )
-  )
+  ) {
+    updateQuestionControls();
     return;
+  }
   const q = $("#question-list");
+  if (!questionState) {
+    empty(q, "Loading unanswered questions…");
+    updateQuestionControls();
+    return;
+  }
+  const signature = JSON.stringify([
+    questionState.questions,
+    state.facts,
+    state.demo,
+    $("#question-search").value,
+  ]);
+  if (signature === renderedQuestionSignature) {
+    updateQuestionControls();
+    return;
+  }
+  renderedQuestionSignature = signature;
   q.replaceChildren();
-  if (!state.questions.length)
+  if (!questionState.questions.length)
     empty(
       q,
-      "No unanswered personal questions. New questions will appear here without stopping the rest of the search.",
+      $("#question-search").value.trim()
+        ? "No unanswered questions match your search."
+        : "No unanswered personal questions. New questions will appear here without stopping the rest of the search.",
     );
-  for (const x of state.questions) {
+  for (const x of questionState.questions) {
     const box = el("article", undefined, "question");
     box.append(el("h3", x.label));
-    const job = state.jobs.find((j) => j.id === x.job_id);
-    if (job) box.append(link(job.url, `${job.company} · ${job.title}`));
+    if (x.company)
+      box.append(
+        state.demo
+          ? el("p", `${x.company} · ${x.title}`)
+          : link(x.url, `${x.company} · ${x.title}`),
+      );
     box.append(el("p", x.reason, "subtle"));
     const f = el("form");
-    const options = JSON.parse(x.options);
+    let options;
+    try {
+      options = JSON.parse(x.options);
+      if (
+        !Array.isArray(options) ||
+        options.some((option) => typeof option !== "string")
+      )
+        throw new Error();
+    } catch {
+      box.append(
+        el(
+          "p",
+          "This saved question has invalid choices. Check the private history or skip the company before proceeding.",
+          "help",
+        ),
+      );
+      q.append(box);
+      continue;
+    }
     const input = options.length ? el("select") : el("textarea");
     input.required = true;
     input.setAttribute("aria-label", x.label);
@@ -728,8 +842,22 @@ function renderQuestions() {
     bind.onchange = () => {
       if (bind.value) input.value = state.facts[bind.value].value;
     };
-    const b = el("button", "Save once and reuse");
-    f.append(input, bind, b);
+    const b = el("button", "Save once and reuse"),
+      discard = el("button", "Discard draft", "secondary");
+    b.disabled = state.demo;
+    discard.type = "button";
+    discard.dataset.questionDiscard = "true";
+    discard.hidden = true;
+    discard.onclick = () => {
+      input.value = "";
+      bind.value = "";
+      saved(f);
+      updateQuestionControls();
+      input.focus();
+    };
+    const actions = el("div", undefined, "actions");
+    actions.append(b, discard);
+    f.append(input, bind, actions);
     f.onsubmit = async (e) => {
       e.preventDefault();
       try {
@@ -743,6 +871,16 @@ function renderQuestions() {
         note(
           "Answer saved. Matching applications can use it in the next cycle.",
         );
+        box.remove();
+        const previousLength = questionState.questions.length;
+        questionState.questions = questionState.questions.filter(
+          (question) => question.id !== x.id,
+        );
+        if (questionState.questions.length < previousLength)
+          questionState.total = Math.max(0, questionState.total - 1);
+        renderedQuestionSignature = null;
+        updateQuestionControls();
+        await loadQuestionLedger();
         await refresh();
       } catch (e) {
         note(e.message, true);
@@ -751,6 +889,34 @@ function renderQuestions() {
     box.append(f);
     q.append(box);
   }
+  updateQuestionControls();
+}
+$("#question-search").addEventListener("input", () => {
+  clearTimeout(questionTimer);
+  questionRequest++;
+  questionTimer = setTimeout(() => loadQuestionLedger(true), 220);
+});
+$("#question-previous").onclick = () => {
+  questionOffset = Math.max(0, questionOffset - (questionState?.limit || 25));
+  loadQuestionLedger(false, true);
+};
+$("#question-next").onclick = () => {
+  questionOffset += questionState?.limit || 25;
+  loadQuestionLedger(false, true);
+};
+$("#question-retry").onclick = () => loadQuestionLedger(true);
+for (const type of ["input", "change"])
+  document.addEventListener(type, (event) => {
+    if (event.target.closest?.("#question-list")) updateQuestionControls();
+  });
+function renderQuestions() {
+  if (
+    [...document.querySelectorAll("#questions form")].some(
+      (form) => dirtyForms.has(form) || form.contains(document.activeElement),
+    )
+  )
+    return;
+  renderQuestionList();
   table(
     state.jobs.filter(
       (j) => j.status === "blocked" && (j.requires_attention ?? true),

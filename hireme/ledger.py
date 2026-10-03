@@ -31,8 +31,9 @@ def summary(store, at=None):
         UNION SELECT job_id FROM applications WHERE state IN ('unknown','awaiting_verification')
     )""", parameters).fetchone()[0]
     accounts = store.db.execute("SELECT COUNT(*) FROM employer_accounts WHERE state='uncertain'").fetchone()[0]
+    questions = store.db.execute('SELECT COUNT(*) FROM questions WHERE resolved=0').fetchone()[0]
     return {'job_count': sum(counts.values()), 'status_counts': counts, 'submitted_today': submitted,
-            'attention_count': attention + accounts, 'local_date': local.date().isoformat()}
+            'attention_count': attention + accounts, 'question_count': questions, 'local_date': local.date().isoformat()}
 
 
 def spreadsheet_text(value):

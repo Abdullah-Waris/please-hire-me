@@ -457,8 +457,9 @@ class Store:
         row=self.db.execute('SELECT * FROM applications WHERE id=?',(aid,)).fetchone()
         return dict(row) if row else None
 
-    def snapshot(self,material_offset=0,include_packages=True):
+    def snapshot(self,material_offset=0,include_packages=True,question_limit=None):
         if type(material_offset) is not int or not 0<=material_offset<=1000000:raise ValueError("Invalid material page")
+        if question_limit is not None and (type(question_limit) is not int or not 1<=question_limit<=100):raise ValueError('Invalid question limit')
         def rows(q,parameters=()): return [dict(x) for x in self.db.execute(q,parameters)]
         from .presentation import attention_sql
         condition,parameters=attention_sql('j')
@@ -466,7 +467,7 @@ class Store:
         return {"settings":self.settings(),"templates":self.templates(),"facts":self.facts(False),"missing_setup":self.missing_setup(),
                 "jobs":rows(f"SELECT j.* FROM jobs j ORDER BY {priority} DESC,j.score DESC,j.first_seen DESC LIMIT 500",parameters),
                 "applications":rows(f"SELECT {'*' if include_packages else APPLICATION_METADATA} FROM applications ORDER BY (state IN ('unknown','awaiting_verification')) DESC,created DESC LIMIT 500"),
-                "questions":rows("SELECT * FROM questions WHERE resolved=0 ORDER BY rowid"),
+                "questions":rows("SELECT * FROM questions WHERE resolved=0 ORDER BY rowid" + (" LIMIT ?" if question_limit is not None else ''), (question_limit,) if question_limit is not None else ()),
                 "runs":rows("SELECT * FROM runs ORDER BY started DESC LIMIT 30"),
                 "sources":rows("SELECT * FROM sources ORDER BY (error!='') DESC,checked DESC,id LIMIT 100"),
                 "employer_accounts":rows("SELECT * FROM employer_accounts ORDER BY (state IN ('uncertain','creating','signing_in')) DESC,updated DESC,id LIMIT 100"),

@@ -92,7 +92,7 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
             store=Store(root)
             try:
                 if path=='/api/state':
-                    try:offset=int(parse_qs(urlsplit(self.path).query).get('material_offset',['0'])[0]);snapshot=store.snapshot(offset,include_packages=False)
+                    try:offset=int(parse_qs(urlsplit(self.path).query).get('material_offset',['0'])[0]);snapshot=store.snapshot(offset,include_packages=False,question_limit=50)
                     except ValueError:return self.send(400,{'error':'Invalid material page'})
                     from .gmail import status as gmail_status
                     from .reports import report_status
@@ -132,6 +132,12 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     from .account_ledger import search_accounts
                     query=parse_qs(urlsplit(self.path).query)
                     try:result=search_accounts(store,search=query.get('search',[''])[0],status=query.get('status',['uncertain'])[0],offset=int(query.get('offset',['0'])[0]))
+                    except ValueError as error:return self.send(400,{'error':str(error)})
+                    return self.send(200,result)
+                if path=='/api/questions':
+                    from .question_ledger import search_questions
+                    query=parse_qs(urlsplit(self.path).query)
+                    try:result=search_questions(store,search=query.get('search',[''])[0],offset=int(query.get('offset',['0'])[0]))
                     except ValueError as error:return self.send(400,{'error':str(error)})
                     return self.send(200,result)
                 if path.startswith('/api/application/'):
