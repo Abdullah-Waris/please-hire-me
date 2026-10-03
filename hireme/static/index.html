@@ -229,6 +229,7 @@
                 ><span aria-hidden="true">⌕</span
                 ><input
                   id="job-search"
+                  maxlength="200"
                   type="search"
                   placeholder="Search company, role or location"
                   aria-label="Search opportunities" /></label
@@ -259,7 +260,32 @@
               >
             </div>
             <p id="ledger-scope" class="help ledger-scope"></p>
-            <div id="jobs"></div>
+            <div id="jobs" tabindex="-1"></div>
+            <div class="ledger-pagination">
+              <span
+                id="ledger-page-label"
+                class="help"
+                role="status"
+                aria-live="polite"
+              ></span>
+              <div class="actions">
+                <button
+                  id="ledger-previous"
+                  class="secondary"
+                  type="button"
+                  disabled
+                >
+                  ← Previous</button
+                ><button
+                  id="ledger-next"
+                  class="secondary"
+                  type="button"
+                  disabled
+                >
+                  Next →
+                </button>
+              </div>
+            </div>
           </div>
           <details id="add-posting-panel" class="section">
             <summary>Add a specific posting</summary>

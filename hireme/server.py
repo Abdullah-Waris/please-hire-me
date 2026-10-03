@@ -98,6 +98,14 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     snapshot['jobs']=[{**job,**job_display(job)} for job in snapshot['jobs']]
                     snapshot['demo']=demo
                     return self.send(200,{**snapshot,'fact_labels':FACTS,'required':sorted(REQUIRED),'worker_running':state['running'] or any(r['status']=='running' for r in snapshot['runs'])})
+                if path=='/api/jobs':
+                    from .ledger import search_jobs
+                    query=parse_qs(urlsplit(self.path).query)
+                    try:
+                        result=search_jobs(store,search=query.get('search',[''])[0],status=query.get('status',['all'])[0],
+                            sort=query.get('sort',['recent'])[0],offset=int(query.get('offset',['0'])[0]))
+                    except ValueError as error:return self.send(400,{'error':str(error)})
+                    return self.send(200,result)
                 if path=='/api/export.csv':
                     from .ledger import export_csv
                     return self.send(200,export_csv(store),'text/csv; charset=utf-8',download='application-ledger.csv')

@@ -1605,3 +1605,37 @@ pre {
 .approved-body {
   white-space: pre-wrap;
 }
+.ledger-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 16px 24px;
+  border-top: 1px solid var(--rule);
+}
+.ledger-pagination button {
+  font-size: 11px;
+}
+@media (max-width: 600px) {
+  .ledger-pagination {
+    padding: 16px;
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .ledger-pagination .actions button {
+    flex: 1;
+  }
+}
+.job-title,
+.company-info,
+.answer-log,
+.run-row,
+#notice,
+.dialog-head,
+.approved-body,
+.question {
+  overflow-wrap: anywhere;
+}
+.dialog-head > div {
+  min-width: 0;
+}

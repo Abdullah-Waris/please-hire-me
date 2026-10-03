@@ -216,46 +216,91 @@ const statusLabels = {
 };
 function jobPayload(job) {
   try {
-    return JSON.parse(job.payload);
+    const payload = JSON.parse(job.payload);
+    return payload && typeof payload === "object" && !Array.isArray(payload)
+      ? payload
+      : {};
   } catch {
     return {};
   }
 }
 let ledgerSignature = "";
+let ledgerState = null,
+  ledgerOffset = 0,
+  ledgerRequest = 0,
+  ledgerTimer = null;
+async function loadLedger(reset = false) {
+  if (!state) return;
+  if (reset) ledgerOffset = 0;
+  const request = ++ledgerRequest;
+  const params = new URLSearchParams({
+    search: $("#job-search").value,
+    status: $("#status-filter").value,
+    sort: $("#job-sort").value,
+    offset: String(ledgerOffset),
+  });
+  $("#jobs").setAttribute("aria-busy", "true");
+  $("#ledger-previous").disabled = true;
+  $("#ledger-next").disabled = true;
+  try {
+    const result = await api("/api/jobs?" + params);
+    if (request !== ledgerRequest) return;
+    if (result.total > 0 && result.offset >= result.total) {
+      ledgerOffset =
+        Math.floor((result.total - 1) / result.limit) * result.limit;
+      return loadLedger(false);
+    }
+    ledgerState = result;
+    renderLedger();
+  } catch (error) {
+    if (request === ledgerRequest) {
+      note(error.message, true);
+      if (ledgerState) {
+        $("#ledger-previous").disabled = ledgerState.offset === 0;
+        $("#ledger-next").disabled =
+          ledgerState.offset + ledgerState.limit >= ledgerState.total;
+      }
+      $("#ledger-page-label").textContent =
+        "Could not refresh. Showing the last loaded results.";
+    }
+  } finally {
+    if (request === ledgerRequest)
+      $("#jobs").setAttribute("aria-busy", "false");
+  }
+}
 function renderLedger() {
   if (!state) return;
-  $("#ledger-scope").textContent =
-    state.summary && state.summary.job_count > state.jobs.length
-      ? `Showing ${state.jobs.length} highest-ranked opportunities of ${state.summary.job_count}. Export CSV includes the full ledger.`
-      : "";
-  const query = $("#job-search").value.trim().toLocaleLowerCase();
-  const filter = $("#status-filter").value;
-  const jobs = state.jobs.filter((job) => {
-    const searchable =
-      `${job.company} ${job.title} ${jobPayload(job).location || ""}`.toLocaleLowerCase();
-    return (
-      (filter === "all" || (job.display_status || job.status) === filter) &&
-      (!query || searchable.includes(query))
+  $("#ledger-scope").textContent = "";
+  if (!ledgerState) {
+    const parent = $("#jobs");
+    parent.replaceChildren();
+    empty(
+      parent,
+      "Your saved opportunities are on their way.",
+      "Loading your ledger",
+      "↻",
     );
-  });
-  const sort = $("#job-sort").value;
-  jobs.sort((a, b) =>
-    sort === "fit"
-      ? b.score - a.score
-      : sort === "company"
-        ? a.company.localeCompare(b.company)
-        : String(b.first_seen).localeCompare(String(a.first_seen)),
-  );
-  $("#ledger-count").textContent = String(jobs.length);
+    return;
+  }
+  $("#ledger-count").textContent = String(ledgerState.total);
+  const pageLabel = ledgerState.total
+    ? `${ledgerState.offset + 1}–${Math.min(ledgerState.offset + ledgerState.limit, ledgerState.total)} of ${ledgerState.total} opportunities`
+    : "No opportunities to show";
+  if ($("#ledger-page-label").textContent !== pageLabel)
+    $("#ledger-page-label").textContent = pageLabel;
+  $("#ledger-previous").disabled = ledgerState.offset === 0;
+  $("#ledger-next").disabled =
+    ledgerState.offset + ledgerState.limit >= ledgerState.total;
+  const query = $("#job-search").value.trim(),
+    filter = $("#status-filter").value;
   const signature = JSON.stringify([
-    jobs,
-    state.applications,
+    ledgerState.jobs,
+    ledgerState.applications,
     query,
     filter,
-    sort,
   ]);
   if (signature !== ledgerSignature) {
-    table(jobs, $("#jobs"), query || filter !== "all");
+    table(ledgerState.jobs, $("#jobs"), !!query || filter !== "all");
     ledgerSignature = signature;
   }
 }
@@ -346,7 +391,11 @@ function table(jobs, parent, filtered = false) {
     );
     viewDetails.onclick = () => openOpportunity(job);
     d.append(viewDetails);
-    const app = state.applications.find((x) => x.job_id === job.id);
+    const app = (
+      parent.id === "jobs"
+        ? ledgerState?.applications || state.applications
+        : state.applications
+    ).find((x) => x.job_id === job.id);
     if (app) {
       const detail = el("details");
       detail.append(el("summary", "Answers & evidence"));
@@ -992,7 +1041,8 @@ function render() {
   $("#daily-target").textContent =
     `Daily target: ${state.settings.target_per_day}`;
   $("#setup-callout").hidden =
-    state.settings.onboarding_complete && !state.missing_setup.length;
+    state.demo ||
+    (state.settings.onboarding_complete && !state.missing_setup.length);
   $("#worker-state").textContent = state.demo
     ? "Read-only sample workspace"
     : state.worker_running
@@ -1062,6 +1112,7 @@ async function refresh() {
     try {
       state = await api("/api/state?material_offset=" + materialOffset);
       render();
+      await loadLedger(false);
       $("#connection-status").hidden = true;
     } catch (error) {
       const status = $("#connection-status");
@@ -1078,9 +1129,12 @@ document
   .querySelectorAll("[data-view]")
   .forEach((b) => (b.onclick = () => show(b.dataset.view)));
 $("#setup-link").onclick = () => show("setup");
-$("#status-filter").onchange = renderLedger;
-$("#job-sort").onchange = renderLedger;
-$("#job-search").oninput = renderLedger;
+$("#status-filter").onchange = () => loadLedger(true);
+$("#job-sort").onchange = () => loadLedger(true);
+$("#job-search").oninput = () => {
+  clearTimeout(ledgerTimer);
+  ledgerTimer = setTimeout(() => loadLedger(true), 200);
+};
 $("#review-queue").onclick = () => show("questions");
 $("#add-posting").onclick = () => {
   const panel = $("#add-posting-panel");
@@ -1951,3 +2005,25 @@ $("#download-backup").onclick = async () => {
     render();
   }
 };
+
+$("#ledger-previous").onclick = async () => {
+  ledgerOffset = Math.max(0, ledgerOffset - (ledgerState?.limit || 50));
+  await loadLedger(false);
+  scrollLedgerIntoView();
+};
+$("#ledger-next").onclick = async () => {
+  ledgerOffset += ledgerState?.limit || 50;
+  await loadLedger(false);
+  scrollLedgerIntoView();
+};
+
+function scrollLedgerIntoView() {
+  const jobs = $("#jobs");
+  jobs.scrollIntoView({
+    block: "start",
+    behavior: matchMedia("(prefers-reduced-motion: reduce)").matches
+      ? "auto"
+      : "smooth",
+  });
+  jobs.focus({ preventScroll: true });
+}

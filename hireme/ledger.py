@@ -7,7 +7,7 @@ import json
 from datetime import datetime, timedelta, timezone
 from zoneinfo import ZoneInfo
 
-from .presentation import QUIET_REASONS, job_display
+from .presentation import QUIET_REASONS, job_display, attention_sql
 
 EXPORT_COLUMNS = ('Company', 'Role', 'Location', 'Status', 'Fit score', 'Application URL',
                   'First discovered', 'Last updated', 'Attempted', 'Reason')
@@ -24,15 +24,12 @@ def summary(store, at=None):
     counts = dict(store.db.execute('SELECT status,COUNT(*) FROM jobs GROUP BY status'))
     submitted = store.db.execute("""SELECT COUNT(*) FROM applications
         WHERE state='confirmed' AND attempted>=? AND attempted<?""", bounds).fetchone()[0]
-    excluded = tuple(sorted(QUIET_REASONS))
-    placeholders = ','.join('?' for _ in excluded)
+    condition, parameters = attention_sql('j')
     attention = store.db.execute(f"""SELECT COUNT(*) FROM (
         SELECT job_id FROM questions WHERE resolved=0
-        UNION SELECT id FROM jobs WHERE status IN ('unknown','awaiting_verification')
-            OR (status='blocked' AND TRIM(SUBSTR(reason,1,CASE WHEN INSTR(reason,':')>0
-                THEN INSTR(reason,':')-1 ELSE LENGTH(reason) END)) NOT IN ({placeholders}))
+        UNION SELECT j.id FROM jobs j WHERE {condition}
         UNION SELECT job_id FROM applications WHERE state IN ('unknown','awaiting_verification')
-    )""", excluded).fetchone()[0]
+    )""", parameters).fetchone()[0]
     accounts = store.db.execute("SELECT COUNT(*) FROM employer_accounts WHERE state='uncertain'").fetchone()[0]
     return {'job_count': sum(counts.values()), 'status_counts': counts, 'submitted_today': submitted,
             'attention_count': attention + accounts, 'local_date': local.date().isoformat()}
@@ -60,3 +57,57 @@ def export_csv(store):
             job['score'], job['url'], job['first_seen'], job['updated'], job['attempted'], job['reason'])])
     # UTF-8 BOM helps common spreadsheet apps recognize non-ASCII employer names.
     return output.getvalue().encode('utf-8-sig')
+
+
+def search_jobs(store, search='', status='all', sort='recent', offset=0, limit=50):
+    """Search the complete ledger with bounded pages and exact display-status semantics."""
+    from .presentation import NOT_MATCH_REASONS, WAIT_REASONS
+    if not isinstance(search, str) or len(search) > 200:
+        raise ValueError('Search must be 200 characters or fewer')
+    if type(offset) is not int or not 0 <= offset <= 1000000:
+        raise ValueError('Invalid opportunity page')
+    if type(limit) is not int or not 1 <= limit <= 100:
+        raise ValueError('Choose a page size between 1 and 100')
+    ordering = {
+        'recent': 'j.first_seen DESC,j.id',
+        'fit': 'j.score DESC,j.first_seen DESC,j.id',
+        'company': 'j.company COLLATE NOCASE,j.title COLLATE NOCASE,j.id',
+    }
+    if sort not in ordering:
+        raise ValueError('Choose recent, fit, or company sorting')
+    allowed = {'all', 'confirmed', 'blocked', 'unknown', 'awaiting_verification', 'discovered',
+               'not_match', 'waiting', 'prepared', 'submitting', 'rejected', 'not_submitted'}
+    if status not in allowed:
+        raise ValueError('Unknown opportunity status')
+    clauses = []; parameters = []
+    code = "TRIM(SUBSTR(j.reason,1,CASE WHEN INSTR(j.reason,':')>0 THEN INSTR(j.reason,':')-1 ELSE LENGTH(j.reason) END))"
+    if status in ('blocked', 'not_match', 'waiting'):
+        reasons = sorted(QUIET_REASONS if status == 'blocked' else NOT_MATCH_REASONS if status == 'not_match' else WAIT_REASONS)
+        placeholders = ','.join('?' for _ in reasons)
+        clauses.append(f"j.status='blocked' AND {code} {'NOT IN' if status == 'blocked' else 'IN'} ({placeholders})")
+        parameters.extend(reasons)
+    elif status != 'all':
+        clauses.append('j.status=?'); parameters.append(status)
+    term = search.strip().casefold()
+    if term:
+        # Treat % and _ as literal search characters, not SQL wildcard instructions.
+        escaped = term.replace('\\', '\\\\').replace('%', '\\%').replace('_', '\\_')
+        def searchable(company, title, payload):
+            try: location = json.loads(payload).get('location', '')
+            except (ValueError, TypeError, AttributeError): location = ''
+            return f'{company} {title} {location}'.casefold()
+        # Python parsing keeps location search independent of optional SQLite JSON extensions.
+        store.db.create_function('search_text', 3, searchable, deterministic=True)
+        clauses.append("search_text(j.company,j.title,j.payload) LIKE ? ESCAPE '\\'")
+        parameters.append('%' + escaped + '%')
+    where = ' WHERE ' + ' AND '.join('(' + clause + ')' for clause in clauses) if clauses else ''
+    total = store.db.execute('SELECT COUNT(*) FROM jobs j' + where, parameters).fetchone()[0]
+    rows = store.db.execute('SELECT j.* FROM jobs j' + where + ' ORDER BY ' + ordering[sort] + ' LIMIT ? OFFSET ?',
+                            [*parameters, limit, offset])
+    jobs = [{**dict(row), **job_display(dict(row))} for row in rows]
+    applications = []
+    if jobs:
+        placeholders = ','.join('?' for _ in jobs)
+        applications = [dict(row) for row in store.db.execute(
+            f'SELECT * FROM applications WHERE job_id IN ({placeholders})', [job['id'] for job in jobs])]
+    return {'jobs': jobs, 'applications': applications, 'total': total, 'offset': offset, 'limit': limit}

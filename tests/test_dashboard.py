@@ -559,3 +559,58 @@ def test_dashboard_backup_download_restores_paused_and_excludes_credentials(stor
             assert not (restored_root / 'integrations/provider-key.json').exists()
         finally: restored.close()
     finally: process.terminate(); process.join(5)
+
+
+def test_full_ledger_search_and_pagination_preserve_old_evidence(store):
+    from playwright.sync_api import sync_playwright, expect
+    from hireme.discovery import posting
+    for index in range(520):
+        item = posting(f'https://jobs.lever.co/full-ledger/req-{index}', f'Company {index}', 'Software Intern', 'US', 'fixture')
+        store.upsert_job(item)
+        store.db.execute("UPDATE jobs SET score=90,status='confirmed' WHERE id=?", (item['id'],))
+        store.db.execute('''INSERT INTO applications
+            (id,job_id,company_key,state,package,hash,created,updated,attempted)
+            VALUES(?,?,?,?,?,?,?,?,?)''',
+            (f'new-{index}', item['id'], store.company(item['company']), 'confirmed', '{"answers":[]}', 'fixture',
+             '2026-10-02T12:00:00+00:00', '2026-10-02T12:00:00+00:00', '2026-10-02T12:00:00+00:00'))
+    old = posting('https://jobs.lever.co/full-ledger/old', 'Café 100%', 'Research Intern', 'Remote (US)', 'fixture')
+    store.upsert_job(old)
+    store.db.execute("UPDATE jobs SET status='confirmed',first_seen='2020-01-01T00:00:00+00:00' WHERE id=?", (old['id'],))
+    store.db.execute('''INSERT INTO applications
+        (id,job_id,company_key,state,package,hash,created,updated,attempted) VALUES(?,?,?,?,?,?,?,?,?)''',
+        ('old-record', old['id'], store.company(old['company']), 'confirmed',
+         json.dumps({'answers': [{'field': {'label': 'Historic answer'}, 'value': 'Synthetic historic answer', 'provenance': {}}]}),
+         'fixture', '2020-01-01T00:00:00+00:00', '2020-01-01T00:00:00+00:00', '2020-01-01T00:00:00+00:00'))
+    assert old['id'] not in {item['id'] for item in store.snapshot()['jobs']}
+    assert 'old-record' not in {item['id'] for item in store.snapshot()['applications']}
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        try: urllib.request.urlopen(base + '/api/jobs'); assert False
+        except urllib.error.HTTPError as error: assert error.code == 403
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(); errors = []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(base + '/#token=fixture-capability')
+            expect(page.locator('#jobs tbody tr')).to_have_count(50)
+            expect(page.locator('#ledger-page-label')).to_contain_text('1–50 of 521')
+            page.locator('#ledger-next').click()
+            expect(page.locator('#ledger-page-label')).to_contain_text('51–100 of 521')
+            expect(page.locator('#jobs')).to_be_focused()
+            page.locator('#ledger-previous').click()
+            expect(page.locator('#ledger-page-label')).to_contain_text('1–50 of 521')
+            page.locator('#job-search').fill('CAFÉ')
+            expect(page.locator('#jobs tbody tr')).to_have_count(1)
+            expect(page.locator('#jobs')).to_contain_text('Café 100%')
+            expect(page.locator('#ledger-next')).to_be_disabled()
+            page.locator('#jobs').get_by_text('Answers & evidence', exact=True).click()
+            expect(page.locator('#jobs')).to_contain_text('Synthetic historic answer')
+            page.locator('#job-search').fill('100%')
+            expect(page.locator('#jobs tbody tr')).to_have_count(1)
+            assert not errors
+            browser.close()
+    finally: process.terminate(); process.join(5)

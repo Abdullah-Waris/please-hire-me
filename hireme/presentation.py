@@ -74,3 +74,11 @@ def job_display(job):
     reason_label, step = REASON_GUIDANCE.get(code, (code.replace('_', ' ').capitalize(), 'Review the recorded details and the official posting.')) if code else ('', '')
     return {'display_status': display_status, 'status_label': label, 'reason_label': reason_label,
             'next_step': step, 'requires_attention': status in ('unknown', 'awaiting_verification') or status == 'blocked' and code not in QUIET_REASONS}
+
+
+def attention_sql(alias='j'):
+    """The SQL equivalent of requires_attention, with reasons supplied as parameters."""
+    code = f"TRIM(SUBSTR({alias}.reason,1,CASE WHEN INSTR({alias}.reason,':')>0 THEN INSTR({alias}.reason,':')-1 ELSE LENGTH({alias}.reason) END))"
+    reasons = tuple(sorted(QUIET_REASONS))
+    placeholders = ','.join('?' for _ in reasons)
+    return (f"({alias}.status IN ('unknown','awaiting_verification') OR ({alias}.status='blocked' AND {code} NOT IN ({placeholders})))", reasons)

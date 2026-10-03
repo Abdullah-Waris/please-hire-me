@@ -34,7 +34,7 @@ This audit separates implemented software, fixture evidence, and the remaining l
 
 - The frontend now includes live overview cards, search/sort/status filters, responsive application records, a guided checklist, grouped preferences, and an essential-facts view with optional fields.
 - Read-only demo data is disposable and isolated from personal storage. Authenticated CSV exports include the full opportunity ledger and neutralize spreadsheet formula prefixes, while excluding answer packages and documents.
-- Full-ledger totals are verified beyond the 500-row display cap and across 23-hour/25-hour local days. Quiet eligibility decisions remain recorded without inflating the attention queue. Exact diagnostic reasons remain available.
+- Full-ledger totals are verified beyond the auxiliary 500-row snapshot cap and across 23-hour/25-hour local days. Quiet eligibility decisions remain recorded without inflating the attention queue. Exact diagnostic reasons remain available.
 - Form regressions cover unsaved drafts, optional-field toggles, provider-specific controls, malformed JSON feedback, and connection recovery. Local setup diagnostics and port-error messages have coverage.
 - **183 full-suite tests passed** on macOS ARM64 / Python 3.14 in 71.54 seconds, followed by an additional focused form regression. The five PyMuPDF deprecation warnings remain third-party warnings.
 - An axe-core 4.10.3 audit of all eight screens at 1440px, 390px, and 320px found zero WCAG A/AA rule violations for the selected WCAG 2/2.1 rule tags after contrast and focus fixes. All checked screens had no page overflow. This is automated UI evidence on synthetic data, not live employer acceptance evidence.

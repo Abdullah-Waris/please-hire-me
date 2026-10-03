@@ -422,10 +422,13 @@ class Store:
 
     def snapshot(self,material_offset=0):
         if type(material_offset) is not int or not 0<=material_offset<=1000000:raise ValueError("Invalid material page")
-        def rows(q): return [dict(x) for x in self.db.execute(q)]
+        def rows(q,parameters=()): return [dict(x) for x in self.db.execute(q,parameters)]
+        from .presentation import attention_sql
+        condition,parameters=attention_sql('j')
+        priority=f"({condition} OR EXISTS(SELECT 1 FROM questions q WHERE q.job_id=j.id AND q.resolved=0))"
         return {"settings":self.settings(),"templates":self.templates(),"facts":self.facts(False),"missing_setup":self.missing_setup(),
-                "jobs":rows("SELECT * FROM jobs ORDER BY score DESC,first_seen DESC LIMIT 500"),
-                "applications":rows("SELECT * FROM applications ORDER BY created DESC LIMIT 500"),
+                "jobs":rows(f"SELECT j.* FROM jobs j ORDER BY {priority} DESC,j.score DESC,j.first_seen DESC LIMIT 500",parameters),
+                "applications":rows("SELECT * FROM applications ORDER BY (state IN ('unknown','awaiting_verification')) DESC,created DESC LIMIT 500"),
                 "questions":rows("SELECT * FROM questions WHERE resolved=0 ORDER BY rowid"),
                 "runs":rows("SELECT * FROM runs ORDER BY started DESC LIMIT 30"),
                 "sources":rows("SELECT * FROM sources ORDER BY checked DESC LIMIT 100"),
