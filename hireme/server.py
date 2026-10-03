@@ -247,6 +247,11 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     elif path=='/api/provider-check':
                         from .setup_status import readiness
                         result=readiness(store,verify=True)
+                    elif path=='/api/transcript-withdraw':
+                        from .document_controls import withdraw_transcript
+                        from .util import Blocked
+                        try:result=withdraw_transcript(store)
+                        except Blocked:return self.send(409,{'error':'Wait for the active batch to finish before withdrawing your transcript.'})
                     elif path=='/api/remove-provider-key':
                         from .connections import key_path
                         key_path(store).unlink(missing_ok=True);result={'removed':True}

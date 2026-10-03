@@ -673,6 +673,19 @@
           <div class="section">
             <h2>Your transcript</h2>
             <p id="transcript-state">No transcript imported.</p>
+            <button
+              id="withdraw-transcript"
+              type="button"
+              class="secondary"
+              hidden
+            >
+              Stop using transcript
+            </button>
+            <p id="transcript-withdraw-help" class="help" hidden>
+              Stops future uploads and clears unattempted drafts that include
+              it. Private files stay stored for application evidence. Wait for
+              an active batch to finish first.
+            </p>
             <label class="upload"
               >Import a transcript PDF<input
                 id="transcript-upload"

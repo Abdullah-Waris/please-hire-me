@@ -627,6 +627,21 @@ def test_transcript_upload_replace_invalid_and_responsive_ui(tmp_path):
             expect(page.locator('#notice')).to_contain_text('Search preferences saved')
             assert store.settings()['cycle_timeout_seconds'] == 150
             assert not store.settings()['live_enabled']
+            page.locator('[data-view="profile"]').click()
+            page.locator('#facts-form [name="full_name"]').fill('Unsaved synthetic name')
+            from hireme.store import worker_lock
+            with worker_lock(root):
+                page.locator('#withdraw-transcript').click()
+                expect(page.locator('#notice')).to_contain_text('Wait for the active batch to finish')
+                assert store.db.execute("SELECT hash FROM documents WHERE kind='transcript'").fetchone()[0] == updated
+            page.locator('#withdraw-transcript').click()
+            expect(page.locator('#transcript-state')).to_contain_text('No transcript imported')
+            expect(page.locator('#withdraw-transcript')).to_be_hidden()
+            expect(page.locator('#transcript-upload')).to_be_focused()
+            expect(page.locator('#facts-form [name="full_name"]')).to_have_value('Unsaved synthetic name')
+            assert not store.db.execute("SELECT 1 FROM documents WHERE kind='transcript'").fetchone()
+            assert (root/'documents'/(updated+'.pdf')).is_file()
+            assert not store.settings()['live_enabled']
             from hireme.accounts import AccountVault
             store.put_facts({'email':'test@candidate.invalid'})
             vault=AccountVault(store)

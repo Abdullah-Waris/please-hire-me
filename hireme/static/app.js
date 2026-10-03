@@ -12,6 +12,7 @@ let state = null,
   view = "today";
 let refreshing = null;
 let backupBusy = false;
+let transcriptWithdrawalBusy = false;
 let renderedAccountSignature = null;
 let aliasJsonMode = false;
 let renderedBlockedSignature = null;
@@ -1365,16 +1366,6 @@ function renderFacts() {
     group.append(grid);
     parent.append(group);
   }
-  $("#resume-state").textContent = state.documents.some(
-    (x) => x.kind === "resume",
-  )
-    ? "Resume imported and stored privately."
-    : "No resume imported.";
-  $("#transcript-state").textContent = state.documents.some(
-    (x) => x.kind === "transcript",
-  )
-    ? "Transcript imported and stored privately. Upload another PDF to replace it."
-    : "No transcript imported. Jobs requiring one will appear in Needs you.";
   $("#setup-status").textContent = state.missing_setup.length
     ? "Still needed: " +
       state.missing_setup.map((key) => state.fact_labels[key] || key).join(", ")
@@ -1510,6 +1501,20 @@ function renderTemplates() {
     parent.append(details);
   }
 }
+function renderDocumentStatus() {
+  $("#resume-state").textContent = state.documents.some(
+    (x) => x.kind === "resume",
+  )
+    ? "Resume imported and stored privately."
+    : "No resume imported.";
+  $("#transcript-state").textContent = state.documents.some(
+    (x) => x.kind === "transcript",
+  )
+    ? "Transcript imported and stored privately. Upload another PDF to replace it."
+    : "No transcript imported. Jobs requiring one will appear in Needs you.";
+  updateTranscriptWithdrawal();
+}
+
 function renderSettings() {
   const f = $("#settings-form");
   for (const input of f.elements) {
@@ -2002,6 +2007,7 @@ function render() {
   renderTemplates();
   renderMaterials();
   renderMail();
+  renderDocumentStatus();
   if (!editing("#facts-form")) renderFacts();
   if (!editing("#settings-form")) renderSettings();
   renderRuns();
@@ -2469,6 +2475,33 @@ $("#transcript-upload").onchange = async (e) => {
   } finally {
     input.disabled = false;
     input.value = "";
+  }
+};
+
+function updateTranscriptWithdrawal() {
+  const present = state.documents.some(
+    (document) => document.kind === "transcript",
+  );
+  $("#withdraw-transcript").hidden = !present;
+  $("#transcript-withdraw-help").hidden = !present;
+  $("#withdraw-transcript").disabled =
+    state.demo || state.worker_running || transcriptWithdrawalBusy;
+}
+$("#withdraw-transcript").onclick = async () => {
+  transcriptWithdrawalBusy = true;
+  updateTranscriptWithdrawal();
+  try {
+    await api("/api/transcript-withdraw", {});
+    await refresh();
+    note(
+      "Transcript withdrawn from future uploads. Past application evidence stays stored privately.",
+    );
+    $("#transcript-upload").focus();
+  } catch (error) {
+    note(error.message, true);
+  } finally {
+    transcriptWithdrawalBusy = false;
+    updateTranscriptWithdrawal();
   }
 };
 
