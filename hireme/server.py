@@ -292,7 +292,7 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     elif path=='/api/answer':store.answer_question(data['id'],data['value'],data.get('fact_key'));result={'saved':True}
                     elif path=='/api/material-review':
                         from .materials import review_material
-                        review_material(store,data['id'],data['text'],data['role'],data['confirmed']);result={'saved':True}
+                        result={'saved':True,**review_material(store,data['id'],data['text'],data['role'],data['confirmed'])}
                     elif path=='/api/reports/flush':
                         from .reports import flush_reports
                         result=flush_reports(store)

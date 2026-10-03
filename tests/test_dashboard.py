@@ -889,6 +889,12 @@ def test_material_upload_review_and_context_preferences(tmp_path):
             store=Store(root)
             assert store.db.execute('SELECT confirmed,role FROM materials').fetchone()[0]==1
             assert len(store.templates())==1 and not store.facts()
+            revision=store.db.execute('SELECT revision FROM materials').fetchone()[0]
+            store.close()
+            page.locator('.material-review button').click()
+            expect(page.locator('#notice')).to_contain_text('Source unchanged')
+            store=Store(root)
+            assert store.db.execute('SELECT revision FROM materials').fetchone()[0]==revision
             store.close()
             page.screenshot(path='/tmp/hireme-materials-desktop.png',full_page=True)
             page.set_viewport_size({'width':390,'height':844});page.screenshot(path='/tmp/hireme-materials-mobile.png',full_page=True)

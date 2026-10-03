@@ -129,11 +129,13 @@ def review_material(store, mid: str, text: str, role: str, confirmed: bool):
         raise ValueError('Choose how this source can be used and confirm explicitly')
     if not isinstance(text, str) or not 20 <= len(text.strip()) <= 12000:
         raise ValueError('Review an excerpt of 20–12,000 characters')
-    row = store.db.execute('SELECT * FROM materials WHERE id=?', (mid,)).fetchone()
-    if not row:
-        raise ValueError('Source not found')
     text = text.strip()
     with store.transaction():
+        row = store.db.execute('SELECT * FROM materials WHERE id=?', (mid,)).fetchone()
+        if not row:
+            raise ValueError('Source not found')
+        if (row['text'], row['role'], bool(row['confirmed'])) == (text, role, confirmed):
+            return {'changed': False, 'drafts_removed': 0}
         store.db.execute('UPDATE materials SET text=?,role=?,confirmed=?,revision=revision+1,updated=? WHERE id=?',
                          (text, role, int(confirmed), now(), mid))
         tid = 'material:' + mid
@@ -141,7 +143,11 @@ def review_material(store, mid: str, text: str, role: str, confirmed: bool):
             store.put_template('experience', text, tid)
         else:
             store.db.execute('DELETE FROM templates WHERE id=?', (tid,))
-        store.event('material_reviewed', mid, {'confirmed': confirmed, 'role': role})
+        # Any approved source changes the writing context; all unattempted drafts
+        # must be rebuilt. Unapproved excerpt edits have never informed writing.
+        removed = store.discard_prepared() if row['confirmed'] or confirmed else 0
+        store.event('material_reviewed', mid, {'confirmed': confirmed, 'role': role, 'drafts_removed': removed})
+    return {'changed': True, 'drafts_removed': removed}
 
 
 def writing_context(store):

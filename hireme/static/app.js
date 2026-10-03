@@ -2644,7 +2644,7 @@ function renderMaterials() {
       event.preventDefault();
       button.disabled = true;
       try {
-        await api("/api/material-review", {
+        const result = await api("/api/material-review", {
           id: source.id,
           text: text.value,
           role: role.value,
@@ -2653,7 +2653,11 @@ function renderMaterials() {
         saved(form);
         document.activeElement.blur();
         await refresh();
-        note("Source saved. Approved use and revisions are recorded.");
+        note(
+          result.changed === false
+            ? "Source unchanged. Its approval and drafts are preserved."
+            : `Source saved.${result.drafts_removed ? ` ${result.drafts_removed} unattempted draft${result.drafts_removed === 1 ? " was" : "s were"} discarded for a fresh source check.` : ""} Recorded application evidence stays available.`,
+        );
       } catch (error) {
         note(error.message, true);
       } finally {

@@ -85,3 +85,50 @@ def test_source_library_snapshot_is_paginated_without_losing_context(store):
     first=store.snapshot();second=store.snapshot(20)
     assert first['material_count']==25 and len(first['materials'])==20 and len(second['materials'])==5
     assert not {m['id'] for m in first['materials']} & {m['id'] for m in second['materials']}
+
+
+@pytest.mark.parametrize('role', ['personal', 'style', 'reference'])
+def test_review_changes_discard_only_unattempted_drafts(store, job, package, role):
+    source = import_material(store, b'I built a Python service that supports my team.', 'work.txt', 'context')
+    review_material(store, source['id'], source['text'], role, True)
+    recorded = store.prepare(job, package)
+    store.begin_submit(recorded); store.finish(recorded, 'unknown')
+    from hireme.util import digest
+    second = {**job, 'id': digest('source-change-draft'), 'url': job['url'] + '-draft', 'company': 'Other Synthetic Employer'}
+    store.upsert_job(second)
+    draft = store.prepare(second, {**package, 'job_id': second['id'], 'url': second['url']})
+    result = review_material(store, source['id'], source['text'], role, False)
+    assert result == {'changed': True, 'drafts_removed': 1}
+    assert not store.db.execute('SELECT * FROM applications WHERE id=?', (draft,)).fetchone()
+    assert store.db.execute('SELECT status FROM jobs WHERE id=?', (second['id'],)).fetchone()[0] == 'discovered'
+    assert store.db.execute('SELECT state FROM applications WHERE id=?', (recorded,)).fetchone()[0] == 'unknown'
+    assert (store.root / 'materials' / source['filename']).exists()
+
+
+def test_unchanged_review_preserves_revision_and_drafts(store, job, package):
+    source = import_material(store, b'I prefer concise letters grounded in concrete work.', 'voice.txt', 'cover_letter')
+    review_material(store, source['id'], source['text'], 'style', True)
+    draft = store.prepare(job, package)
+    before = store.snapshot(); changes = store.db.total_changes
+    assert review_material(store, source['id'], '  ' + source['text'] + '  ', 'style', True) == {'changed': False, 'drafts_removed': 0}
+    assert store.snapshot() == before and store.db.total_changes == changes
+    assert store.db.execute('SELECT id FROM applications WHERE id=?', (draft,)).fetchone()
+
+
+def test_unapproved_excerpt_edit_does_not_discard_drafts(store, job, package):
+    source = import_material(store, b'I prefer concise letters grounded in concrete work.', 'voice.txt', 'cover_letter')
+    draft = store.prepare(job, package)
+    result = review_material(store, source['id'], source['text'] + ' Keep a warm tone.', 'style', False)
+    assert result == {'changed': True, 'drafts_removed': 0}
+    assert store.db.execute('SELECT id FROM applications WHERE id=?', (draft,)).fetchone()
+
+
+def test_review_failure_rolls_back_source_and_draft_invalidation(store, job, package, monkeypatch):
+    source = import_material(store, b'I prefer concise letters grounded in concrete work.', 'voice.txt', 'cover_letter')
+    review_material(store, source['id'], source['text'], 'style', True)
+    store.prepare(job, package)
+    before = store.snapshot()
+    def failed(*args, **kwargs): raise OSError('Synthetic event write failure')
+    monkeypatch.setattr(store, 'event', failed)
+    with pytest.raises(OSError): review_material(store, source['id'], source['text'], 'style', False)
+    assert store.snapshot() == before
