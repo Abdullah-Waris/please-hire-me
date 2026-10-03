@@ -219,4 +219,5 @@ def verification_code(message, recipient, company, since, length=8):
     if not re.search(r'application', text, re.I) or length not in (6, 8):
         return None
     codes = set(re.findall(r'(?:verification|security|confirmation|one[- ]time)\s+code\s*(?:is\s*)?[:\-]?\s*([A-Z0-9]{' + str(length) + r'})(?![A-Z0-9])', text, re.I))
+    codes.update(re.findall(r'Copy and paste this code into the security code field on your application:\s*([A-Z0-9]{'+str(length)+r'})(?![A-Z0-9])',text,re.I))
     return next(iter(codes)) if len(codes) == 1 else None

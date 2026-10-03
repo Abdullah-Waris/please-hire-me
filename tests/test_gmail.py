@@ -76,3 +76,14 @@ def test_oauth_client_stored_privately_and_endpoints_restricted(store,tmp_path):
     assert (store.root/'integrations/gmail-client.json').stat().st_mode&0o777==0o600
     p.write_text(json.dumps({'installed':{'client_id':'synthetic','client_secret':'synthetic-secret','auth_uri':'https://attacker.invalid','token_uri':'https://oauth2.googleapis.com/token'}}))
     with pytest.raises(ValueError):import_client(store,p)
+
+
+def test_greenhouse_current_email_template_preserves_case_and_requires_authentication():
+    since=time.time();m=message(company='Neuralink',since=since)
+    m['payload']['headers'][0]['value']='Greenhouse <no-reply@us.greenhouse-mail.io>'
+    m['payload']['headers'][3]['value']='mx.google.com; dkim=pass header.i=@us.greenhouse-mail.io header.s=mailgun; spf=pass'
+    m['payload']['headers'][2]['value']='Security code for your application to Neuralink'
+    m['payload']['body']['data']=base64.urlsafe_b64encode(b'Copy and paste this code into the security code field on your application:\r\n\r\nAb12Cd34\r\n\r\nAfter you enter the code, resubmit your application.').decode()
+    assert verification_code(m,'test@candidate.invalid','Neuralink',since)=='Ab12Cd34'
+    m['payload']['headers'][3]['value']='mx.google.com; dkim=fail header.i=@us.greenhouse-mail.io'
+    assert verification_code(m,'test@candidate.invalid','Neuralink',since) is None

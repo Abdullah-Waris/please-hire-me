@@ -500,3 +500,18 @@ def test_batched_ashby_autosave_is_aborted_but_submission_batch_stays_blocked(st
     route.request.post_data=json.dumps([{'operationName':'Submit','query':'mutation Submit { submit { id } }'}])
     b._route(route)
     assert b.denied_write and b.denied_request['operations']==['Submit']
+
+
+def test_ashby_upload_handle_only_for_approved_document_bytes(store,monkeypatch):
+    monkeypatch.setattr('hireme.browser.public_host',lambda host:True)
+    b=Browser(store);b.current_host='jobs.ashbyhq.com';b.upload_payloads={'approved':b'pdf-bytes'}
+    class Request:
+        url='https://jobs.ashbyhq.com/api/non-user-graphql';method='POST'
+        post_data=json.dumps({'operationName':'ApiCreateFileUploadHandle','query':'mutation ApiCreateFileUploadHandle { createFileUploadHandle { handle } }','variables':{'filename':'approved.pdf','contentType':'application/pdf','contentLength':9}})
+    class Route:
+        request=Request();action=None
+        def abort(self):self.action='abort'
+        def continue_(self):self.action='continue'
+    route=Route();b._route(route);assert route.action=='continue'
+    data=json.loads(route.request.post_data);data['variables']['filename']='unknown.pdf';route.request.post_data=json.dumps(data)
+    b._route(route);assert route.action=='abort' and b.denied_write

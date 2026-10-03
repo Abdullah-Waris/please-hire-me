@@ -162,6 +162,16 @@ class Browser:
                     queries=data if isinstance(data,list) else [data]
                     reading=all(isinstance(q,dict) and isinstance(q.get('query'),str) and re.match(r'^\s*query\b',q['query']) for q in queries)
                 except (ValueError,TypeError):pass
+                if host==self.current_host=='jobs.ashbyhq.com' and p.path=='/api/non-user-graphql' and isinstance(data,dict):
+                    variables=data.get('variables',{})
+                    if (data.get('operationName')=='ApiCreateFileUploadHandle'
+                            and isinstance(data.get('query'),str)
+                            and re.match(r'^\s*mutation\s+ApiCreateFileUploadHandle\b',data['query'])
+                            and isinstance(variables,dict)):
+                        filename=variables.get('filename')
+                        uploading_document=next((blob for h,blob in self.upload_payloads.items() if filename==h+'.pdf'),None)
+                        reading=bool(uploading_document and variables.get('contentType')=='application/pdf'
+                                     and variables.get('contentLength')==len(uploading_document))
                 # Upload-only requests are permitted on known ATS upload paths, never arbitrary mutations.
                 reading=reading or p.path=='/uncacheable_attributes/presigned_fields'
                 passive_check=p.path.startswith("/cdn-cgi/challenge-platform/")
