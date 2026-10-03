@@ -50,7 +50,8 @@ def test_api_only_login_is_rejected(monkeypatch):
     with pytest.raises(Blocked):ClaudeProvider().choose_answer('Test',[])
 
 
-def test_pause_cancels_real_inference_subprocess():
+def test_pause_cancels_real_inference_subprocess(monkeypatch):
+    monkeypatch.setattr("hireme.provider.shutil.which",lambda _: "/fixture/claude")
     import sys,time,pytest
     from hireme.util import Blocked
     started=time.monotonic()
@@ -72,7 +73,8 @@ def test_team_subscription_is_accepted(monkeypatch):
     assert ClaudeProvider().choose_answer('test',[]) is None
 
 
-def test_grounding_rejection_repairs_with_specific_feedback():
+def test_grounding_rejection_repairs_with_specific_feedback(monkeypatch):
+    monkeypatch.setattr("hireme.provider.shutil.which",lambda _: "/fixture/claude")
     p=ClaudeProvider();calls=[];events=[]
     responses=iter([{'answer':'Unsupported claim','sentence_ids':['s1']},{'supported':False,'reason':'Unsupported metric'}, {'answer':'I want to build useful tools.','sentence_ids':['s1']},{'supported':True,'reason':'Grounded interest'}])
     def request(instruction,data,schema):

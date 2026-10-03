@@ -94,7 +94,8 @@ def test_transcript_upload_replace_invalid_and_responsive_ui(tmp_path):
 
 
 def launch_setup(root,repo,port,queue):
-    from hireme import scheduler,worker
+    from hireme import scheduler,worker,setup_status
+    setup_status.readiness=lambda store,verify=False: {'supported_platform':True,'browser_ready':True,'provider':{'ready':True}}
     scheduler.install=lambda store,repo:'fixture scheduler'
     worker.cycle=lambda store,repo:queue.put('first cycle started')
     serve(Path(root),Path(repo),port,token='fixture-capability')

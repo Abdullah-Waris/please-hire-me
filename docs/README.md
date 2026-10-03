@@ -5,6 +5,7 @@ Start with the [README](../README.md) for installation, guided setup, provider c
 | Reference | Purpose |
 | --- | --- |
 | [Architecture](architecture.md) | Component boundaries, state, concurrency, and external verification limits |
+| [Readiness audit](readiness.md) | Fresh-environment proof and outstanding live/account requirements |
 | [Worker contract](worker-contract.md) | Executable policy and submission invariants |
 | [Configuration examples](../config/README.md) | Public reference formats; never applicant defaults |
 | [Discovery data](../data/README.md) | Runtime seed inputs and historical public research |
