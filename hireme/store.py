@@ -465,8 +465,8 @@ class Store:
                 "applications":rows(f"SELECT {'*' if include_packages else APPLICATION_METADATA} FROM applications ORDER BY (state IN ('unknown','awaiting_verification')) DESC,created DESC LIMIT 500"),
                 "questions":rows("SELECT * FROM questions WHERE resolved=0 ORDER BY rowid"),
                 "runs":rows("SELECT * FROM runs ORDER BY started DESC LIMIT 30"),
-                "sources":rows("SELECT * FROM sources ORDER BY checked DESC LIMIT 100"),
-                "employer_accounts":rows("SELECT * FROM employer_accounts ORDER BY updated DESC LIMIT 100"),
+                "sources":rows("SELECT * FROM sources ORDER BY (error!='') DESC,checked DESC,id LIMIT 100"),
+                "employer_accounts":rows("SELECT * FROM employer_accounts ORDER BY (state IN ('uncertain','creating','signing_in')) DESC,updated DESC,id LIMIT 100"),
                 "documents":rows("SELECT * FROM documents"),"materials":[dict(r) for r in self.db.execute("SELECT * FROM materials ORDER BY created DESC,id DESC LIMIT 20 OFFSET ?",(material_offset,))],"material_count":self.db.execute("SELECT count(*) FROM materials").fetchone()[0],"material_offset":material_offset}
 
 

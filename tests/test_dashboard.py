@@ -868,3 +868,61 @@ def test_record_evidence_loads_on_demand_retries_and_stays_open_after_refresh(st
             assert len(images) == 2 and not errors
             browser.close()
     finally: process.terminate(); process.join(5)
+
+
+def test_account_queue_pages_old_holds_and_preserves_verification_drafts(store):
+    from playwright.sync_api import sync_playwright, expect
+    for index in range(120):
+        store.db.execute('INSERT INTO employer_accounts VALUES(?,?,?,?,?)',
+            (f'recent-{index}', 'https://jobs.lever.co', f'Recent company {index}', 'confirmed', '2026-10-03T00:00:00+00:00'))
+    for index in range(30):
+        store.db.execute('INSERT INTO employer_accounts VALUES(?,?,?,?,?)',
+            (f'held-{index}', 'https://jobs.lever.co', f'Held company {index}', 'uncertain', '2020-01-01T00:00:00+00:00'))
+    store.db.execute('INSERT INTO employer_accounts VALUES(?,?,?,?,?)',
+        ('old-special', 'https://jobs.lever.co', 'Café 100%_ Research', 'uncertain', '2019-01-01T00:00:00+00:00'))
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        try: urllib.request.urlopen(base + '/api/accounts'); assert False
+        except urllib.error.HTTPError as error: assert error.code == 403
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 320, 'height': 844}); errors = []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(base + '/#token=fixture-capability')
+            page.locator('[data-view=questions]').click()
+            expect(page.locator('#account-page')).to_contain_text('1–25 of 31')
+            expect(page.locator('#employer-accounts form')).to_have_count(25)
+            page.route('**/api/accounts*', lambda route: route.fulfill(status=503, json={'error': 'Synthetic account-history outage'}))
+            page.locator('#account-search').fill('Held company')
+            expect(page.locator('#account-error')).to_contain_text('Synthetic account-history outage')
+            page.unroute('**/api/accounts*')
+            page.locator('#account-retry').click()
+            expect(page.locator('#account-page')).to_contain_text('1–25 of 30')
+            page.locator('#account-search').fill('')
+            expect(page.locator('#account-page')).to_contain_text('1–25 of 31')
+            proof = page.locator('#employer-accounts textarea').first
+            proof.fill('Unsaved synthetic verification evidence')
+            expect(page.locator('#account-next')).to_be_disabled()
+            expect(page.locator('#account-search')).to_be_disabled()
+            proof.blur(); page.evaluate('refresh()')
+            expect(proof).to_have_value('Unsaved synthetic verification evidence')
+            page.locator('#employer-accounts').get_by_role('button', name='Discard draft').first.click()
+            expect(page.locator('#account-next')).to_be_enabled()
+            page.locator('#account-next').click()
+            expect(page.locator('#account-page')).to_contain_text('26–31 of 31')
+            expect(page.locator('#employer-accounts')).to_be_focused()
+            expect(page.locator('#employer-accounts')).to_contain_text('Café 100%_ Research')
+            page.locator('#account-search').fill('CAFÉ 100%_')
+            expect(page.locator('#account-page')).to_contain_text('1–1 of 1')
+            expect(page.locator('#employer-accounts form')).to_have_count(1)
+            page.locator('#account-search').fill('Recent company 119')
+            page.locator('#account-filter').select_option('all')
+            expect(page.locator('#employer-accounts')).to_contain_text('Account verified')
+            expect(page.locator('#employer-accounts form')).to_have_count(0)
+            assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            browser.close()
+    finally: process.terminate(); process.join(5)

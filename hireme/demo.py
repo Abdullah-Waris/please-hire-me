@@ -59,6 +59,8 @@ def seed(store):
                      ('demo-batch', started, stamp, 'finished', 2, json.dumps({
                          'confirmed': 2, 'attempts': 3, 'target': 3, 'shortfall': 1,
                          'outcomes': {'confirmed': 2, 'blocked': 1}, 'reason': 'Sample batch. No applications were sent.'})))
+    store.db.execute('INSERT INTO employer_accounts VALUES(?,?,?,?,?)',
+                     ('demo-account', 'https://jobs.lever.co', 'Openwater', 'uncertain', stamp))
 
 
 def run(repo: Path, port=8767, open_browser=False):

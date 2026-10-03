@@ -123,3 +123,20 @@ def test_snapshot_keeps_old_uncertain_outcomes_and_question_context_visible(stor
     assert held['id'] in {job['id'] for job in snapshot['jobs']}
     assert question_job['id'] in {job['id'] for job in snapshot['jobs']}
     assert held['id'] in {record['job_id'] for record in snapshot['applications']}
+
+
+def test_old_unresolved_accounts_and_source_failures_are_not_buried_by_recent_successes(store):
+    for index in range(120):
+        store.db.execute('INSERT INTO employer_accounts VALUES(?,?,?,?,?)',
+                         (f'recent-account-{index}', 'https://jobs.lever.co', f'Company {index}', 'confirmed', '2026-10-03T00:00:00+00:00'))
+        store.db.execute('INSERT INTO sources VALUES(?,?,?,?,?)',
+                         (f'recent-source-{index}', 'ok', '2026-10-03T00:00:00+00:00', '', '{}'))
+    store.db.execute('INSERT INTO employer_accounts VALUES(?,?,?,?,?)',
+                     ('old-held-account', 'https://jobs.lever.co', 'Held company', 'uncertain', '2020-01-01T00:00:00+00:00'))
+    store.db.execute('INSERT INTO sources VALUES(?,?,?,?,?)',
+                     ('old-failed-source', 'error', '2020-01-01T00:00:00+00:00', 'Synthetic source failure', '{}'))
+    snapshot = store.snapshot(include_packages=False)
+    assert len(snapshot['employer_accounts']) == len(snapshot['sources']) == 100
+    assert snapshot['employer_accounts'][0]['id'] == 'old-held-account'
+    assert snapshot['sources'][0]['id'] == 'old-failed-source'
+    assert summary(store)['attention_count'] == 1

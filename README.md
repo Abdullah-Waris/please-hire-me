@@ -71,7 +71,9 @@ To export job metadata from a terminal:
 
 Choose a new filename; existing files are never overwritten. CSV is an export of opportunities, not a backup of your applicant data.
 
-Open **Answers & evidence** to load an application’s recorded responses and optional confirmation image. Routine refreshes transfer application metadata without full answer packages. Open evidence and diagnostic panels keep their position and keyboard focus across refreshes; a viewed confirmation image stays visible until its application record changes. Evidence caches live only in the current page’s memory.
+Open **Answers & evidence** to load an application’s recorded responses and optional confirmation image. Routine refreshes transfer application metadata without full answer packages. Open evidence and diagnostic panels keep their open state and keyboard focus across refreshes; a viewed confirmation image stays visible until its application record changes. Evidence caches live only in the current page’s memory.
+
+Employer accounts in **Needs you** default to **Needs verification**. Search by employer or website, use Previous/Next to review every held account, or choose **All accounts** to see verified history too. Unfinished verification notes survive refreshes; save them or choose **Discard draft** before changing the account filter or page. Account passwords stay in the private vault and are never included in this list. Old unresolved accounts and failed source checks take priority over recent successes in the dashboard snapshot.
 
 ### Check your setup
 

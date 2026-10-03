@@ -362,7 +362,61 @@
             evidence that the account exists and you can sign in. Passwords are
             never displayed here.
           </p>
-          <div id="employer-accounts"></div>
+          <div class="form-grid">
+            <label
+              >Show accounts<select id="account-filter">
+                <option value="uncertain">Needs verification</option>
+                <option value="all">All accounts</option>
+              </select></label
+            >
+            <label
+              >Search employer or website<input
+                id="account-search"
+                type="search"
+                maxlength="200"
+                autocomplete="off"
+            /></label>
+          </div>
+          <p id="account-draft-help" class="help" hidden>
+            Save your verification evidence before changing account pages or
+            filters.
+          </p>
+          <p id="account-error" class="help" role="alert" hidden></p>
+          <button id="account-retry" type="button" class="secondary" hidden>
+            Retry account history
+          </button>
+          <div
+            id="employer-accounts"
+            tabindex="-1"
+            role="region"
+            aria-label="Employer account records"
+          ></div>
+          <div class="ledger-pagination">
+            <span
+              id="account-page"
+              class="help"
+              role="status"
+              aria-live="polite"
+            ></span>
+            <div class="actions">
+              <button
+                id="account-previous"
+                type="button"
+                class="secondary"
+                disabled
+              >
+                Previous accounts
+              </button>
+              <button
+                id="account-next"
+                type="button"
+                class="secondary"
+                disabled
+              >
+                Next accounts
+              </button>
+            </div>
+          </div>
         </section>
         <section id="profile" class="view" hidden>
           <div class="section">

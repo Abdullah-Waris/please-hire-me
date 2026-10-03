@@ -113,6 +113,12 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                             sort=query.get('sort',['recent'])[0],offset=int(query.get('offset',['0'])[0]),include_packages=False)
                     except ValueError as error:return self.send(400,{'error':str(error)})
                     return self.send(200,result)
+                if path=='/api/accounts':
+                    from .account_ledger import search_accounts
+                    query=parse_qs(urlsplit(self.path).query)
+                    try:result=search_accounts(store,search=query.get('search',[''])[0],status=query.get('status',['uncertain'])[0],offset=int(query.get('offset',['0'])[0]))
+                    except ValueError as error:return self.send(400,{'error':str(error)})
+                    return self.send(200,result)
                 if path.startswith('/api/application/'):
                     try:record=store.application_record(unquote(path[len('/api/application/'):]))
                     except ValueError as error:return self.send(400,{'error':str(error)})

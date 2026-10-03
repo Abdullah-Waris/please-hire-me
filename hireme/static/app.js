@@ -12,6 +12,12 @@ let state = null,
   view = "today";
 let refreshing = null;
 let backupBusy = false;
+let renderedAccountSignature = null;
+let accountState = null,
+  accountOffset = 0,
+  accountBusy = false,
+  accountTimer,
+  accountRequest = 0;
 let scheduleLoaded = false,
   scheduleBusy = false,
   scheduleStatus = null;
@@ -46,15 +52,42 @@ function renderAccounts() {
     )
   )
     return;
+  if (!accountState) {
+    parent.replaceChildren(el("p", "Loading account history…", "help"));
+    updateAccountControls();
+    return;
+  }
+  const accounts = accountState.accounts;
+  const signature = JSON.stringify([
+    accounts,
+    $("#account-filter").value,
+    $("#account-search").value,
+    state.demo,
+  ]);
+  if (renderedAccountSignature === signature && parent.childElementCount) {
+    updateAccountControls();
+    return;
+  }
+  renderedAccountSignature = signature;
   parent.replaceChildren();
-  const accounts = state.employer_accounts || [];
+  updateAccountControls();
   if (!accounts.length)
-    return empty(parent, "No employer accounts created by this worker.");
+    return empty(
+      parent,
+      $("#account-search").value.trim()
+        ? "No accounts match your search."
+        : $("#account-filter").value === "all"
+          ? "No employer accounts created by this worker."
+          : "No employer accounts need verification. Choose All accounts to review their history.",
+    );
   for (const account of accounts) {
     const box = el("article", undefined, "question");
     box.append(
       el("h3", account.company),
-      el("p", `${account.origin} · ${account.state}`),
+      el(
+        "p",
+        `${account.origin} · ${{ uncertain: "Needs your verification", confirmed: "Account verified", creating: "Creating account", signing_in: "Signing in" }[account.state] || account.state.replaceAll("_", " ")}`,
+      ),
     );
     if (account.state === "uncertain") {
       const form = el("form"),
@@ -69,7 +102,18 @@ function renderAccounts() {
       );
       evidence.placeholder =
         "How did you verify that this account exists and you can sign in?";
-      form.append(evidence, el("button", "Confirm verified account"));
+      const confirm = el("button", "Confirm verified account"),
+        discard = el("button", "Discard draft", "secondary");
+      confirm.disabled = state.demo;
+      discard.type = "button";
+      discard.dataset.discardDraft = "true";
+      discard.hidden = true;
+      discard.onclick = () => {
+        evidence.value = "";
+        saved(form);
+        updateAccountControls();
+      };
+      form.append(evidence, confirm, discard);
       form.onsubmit = async (event) => {
         event.preventDefault();
         try {
@@ -80,6 +124,7 @@ function renderAccounts() {
           saved(form);
           document.activeElement.blur();
           await refresh();
+          await loadAccountLedger();
           note("Account confirmed. The next batch can reuse its credentials.");
         } catch (error) {
           note(error.message, true);
@@ -143,6 +188,7 @@ async function api(path, data, raw = false, extraHeaders = {}) {
 function show(name) {
   view = name;
   if (name === "settings" && state && !scheduleLoaded) loadSchedule();
+  if (name === "questions" && state) loadAccountLedger();
   $("#page-eyebrow").textContent = {
     setup: "YOUR NEXT CHAPTER",
     today: "YOUR SEARCH, IN MOTION",
@@ -1396,6 +1442,90 @@ document.addEventListener("visibilitychange", () => {
   if (!document.hidden) refresh();
 });
 $("#retry-connection").onclick = refresh;
+
+function accountDrafts() {
+  return [...$("#employer-accounts").querySelectorAll("form")].some((form) =>
+    dirtyForms.has(form),
+  );
+}
+function updateAccountControls() {
+  const draft = accountDrafts();
+  $("#account-search").disabled = draft;
+  $("#account-filter").disabled = draft;
+  $("#account-retry").disabled = draft || accountBusy;
+  $("#account-previous").disabled =
+    draft || accountBusy || !accountState || accountState.offset === 0;
+  $("#account-next").disabled =
+    draft ||
+    accountBusy ||
+    !accountState ||
+    accountState.offset + accountState.accounts.length >= accountState.total;
+  $("#account-draft-help").hidden = !draft;
+  for (const form of $("#employer-accounts").querySelectorAll("form"))
+    form.querySelector("[data-discard-draft]").hidden = !dirtyForms.has(form);
+  $("#account-page").textContent = accountState
+    ? accountState.total
+      ? `${accountState.offset + 1}–${accountState.offset + accountState.accounts.length} of ${accountState.total} accounts`
+      : "0 matching accounts"
+    : "Checking account history…";
+}
+async function loadAccountLedger(reset = false, focus = false) {
+  if (!state || accountDrafts() || (accountBusy && !reset && !focus)) return;
+  if (reset) accountOffset = 0;
+  const request = ++accountRequest;
+  accountBusy = true;
+  $("#account-error").hidden = true;
+  $("#account-retry").hidden = true;
+  $("#employer-accounts").setAttribute("aria-busy", "true");
+  updateAccountControls();
+  try {
+    const query = new URLSearchParams({
+      search: $("#account-search").value,
+      status: $("#account-filter").value,
+      offset: accountOffset,
+    });
+    const result = await api(`/api/accounts?${query}`);
+    if (request !== accountRequest) return;
+    accountState = result;
+    accountOffset = result.offset;
+    renderAccounts();
+    if (focus) $("#employer-accounts").focus({ preventScroll: true });
+  } catch (error) {
+    if (request === accountRequest) {
+      $("#account-error").textContent = error.message;
+      $("#account-error").hidden = false;
+      $("#account-retry").hidden = false;
+    }
+  } finally {
+    if (request === accountRequest) {
+      accountBusy = false;
+      $("#employer-accounts").removeAttribute("aria-busy");
+      updateAccountControls();
+    }
+  }
+}
+$("#account-search").oninput = () => {
+  clearTimeout(accountTimer);
+  accountTimer = setTimeout(() => loadAccountLedger(true), 200);
+};
+$("#account-filter").onchange = () => loadAccountLedger(true);
+$("#account-retry").onclick = () => loadAccountLedger();
+$("#account-previous").onclick = () => {
+  accountOffset = Math.max(0, accountOffset - 25);
+  loadAccountLedger(false, true);
+};
+$("#account-next").onclick = () => {
+  accountOffset += 25;
+  loadAccountLedger(false, true);
+};
+for (const type of ["input", "change"])
+  document.addEventListener(type, (event) => {
+    if (
+      event.target.form &&
+      $("#employer-accounts").contains(event.target.form)
+    )
+      updateAccountControls();
+  });
 
 function updateScheduleControls() {
   const unsaved = dirtyForms.has($("#settings-form"));
