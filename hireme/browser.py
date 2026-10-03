@@ -13,10 +13,11 @@ from .answers import resolve,REFUSE,field_key
 from .discovery import ATS_HOSTS,PORTAL_HOSTS
 from .util import Blocked,digest,private_dir,public_host,safe_document
 
-UPLOAD_HOSTS={'grnhse-prod-jben-us-west-2.s3.us-west-2.amazonaws.com',
+ASHBY_UPLOAD_HOST='ashbyhq-infra-prd-main-app-uploaded-files-us-east-1.s3.us-east-1.amazonaws.com'
+UPLOAD_HOSTS={ASHBY_UPLOAD_HOST,'grnhse-prod-jben-us-west-2.s3.us-west-2.amazonaws.com',
               'grnhse-prod-jben-us-east-1.s3.us-east-1.amazonaws.com',
               'grnhse-prod-jben-eu-west-1.s3.eu-west-1.amazonaws.com'}
-CONTROLS='input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select,[role=combobox]:not(input):not(select)'
+CONTROLS='input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select,[role=combobox]:not(input):not(select),button.ashby-application-form-input-yesno-option'
 SNAPSHOT=r"""selector => {
  const controls=Array.from(document.querySelectorAll(selector)); const out=[]; const seen=new Set();
  function labelText(n) {
@@ -31,14 +32,25 @@ SNAPSHOT=r"""selector => {
   const direct=Array.from(el.labels||[]).map(labelText).join(' ').trim();
   const field=el.closest('fieldset'); const legend=field?.querySelector('legend')?.innerText;
   const wrapper=el.closest('[class*=form-field],[class*=field-entry],[class*=application-question],.field');
-  return (el.getAttribute('aria-label')||aria||direct||legend||labelText(wrapper?.querySelector('label'))||el.getAttribute('placeholder')||'').trim();
+  return (el.getAttribute('description')||el.getAttribute('aria-label')||aria||direct||legend||labelText(wrapper?.querySelector('label'))||el.getAttribute('placeholder')||'').trim();
  }
  controls.forEach((el,index)=>{
   if(!el.getClientRects().length && el.type!=='file')return;
+  if(el.matches('.ashby-application-form-input-yesno-option')){
+   const group=el.closest('.ashby-application-form-input-yesno');
+   if(!group||seen.has(group))return;seen.add(group);
+   const entry=el.closest('.ashby-application-form-field-entry');
+   const heading=entry?.querySelector('.ashby-application-form-question-title');
+   const buttons=controls.filter(x=>x.matches('.ashby-application-form-input-yesno-option')&&x.closest('.ashby-application-form-input-yesno')===group);
+   out.push({index,indices:buttons.map(x=>controls.indexOf(x)),ref:reference(el),refs:buttons.map(reference),label:heading?.textContent.trim()||'',type:'yesno',options:buttons.map(x=>x.textContent.trim()),required:!!heading?.className.includes('_required_'),maxlength:-1,value:buttons.find(x=>x.getAttribute('aria-pressed')==='true')?.textContent.trim()||'',multiple:false});
+   return;
+  }
   if(el.disabled || el.closest('[aria-hidden=true]') || (el.readOnly && el.tabIndex<0))return;
   let type=el.tagName==='SELECT'?'select':el.tagName==='TEXTAREA'?'textarea':el.getAttribute('role')==='combobox'?'combobox':el.type||'text';
   let indices=[index]; let question=label(el); let options=[]; let value=el.value||'';
   let required=el.required||el.getAttribute('aria-required')==='true'||/\*/.test(question);
+  const ashbyHeading=el.closest('fieldset')?.querySelector('.ashby-application-form-question-title')||el.closest('.ashby-application-form-field-entry')?.querySelector('.ashby-application-form-question-title');
+  required=required||!!ashbyHeading?.className.includes('_required_');
   if(type==='file'){
    const upload=el.closest('.file-upload');
    if(upload)required=required||/\*/.test(upload.innerText.split('\n')[0]);
@@ -47,12 +59,17 @@ SNAPSHOT=r"""selector => {
    else if(/resume|\bcv\b/.test(identity))question='Resume/CV';
    else if(/cover.?letter/.test(identity))question='Cover letter';
   }
-  if(type==='radio'){
-   const name=el.name; if(!name||seen.has(name))return;seen.add(name);
-   const group=controls.filter(x=>x.type==='radio'&&x.name===name);
+  const ashbyGroup=type==='checkbox' ? el.closest('fieldset.ashby-application-form-input-checkbox-group') : null;
+  const checkboxGroup=ashbyGroup || type==='checkbox' && el.name && el.getAttribute('description') && controls.filter(x=>x.type==='checkbox'&&x.name===el.name&&x.getAttribute('description')===el.getAttribute('description')).length>1;
+  if(type==='radio'||checkboxGroup){
+   const name=ashbyGroup||el.name; if(!name||seen.has(name))return;seen.add(name);
+   const group=controls.filter(x=>x.type===el.type&&(ashbyGroup?x.closest('fieldset.ashby-application-form-input-checkbox-group')===ashbyGroup:x.name===name));
+   if(checkboxGroup)type='checkbox-group';
    indices=group.map(x=>controls.indexOf(x)); options=group.map(x=>Array.from(x.labels||[]).map(l=>l.innerText).join(' ').trim()||x.value);
-   const parent=el.closest('fieldset'); question=parent?.querySelector('legend')?.innerText||el.closest('[class*=field],[class*=question]')?.querySelector('label')?.innerText||question;
-   value=group.find(x=>x.checked)?.value||'';
+   const parent=el.closest('fieldset');
+   if(ashbyGroup)required=required||!!ashbyGroup.querySelector('label[class*=_required_]');
+   question=ashbyGroup?.querySelector('.ashby-application-form-question-title')?.innerText||el.getAttribute('description')||parent?.querySelector('legend')?.innerText||el.closest('[class*=field],[class*=question]')?.querySelector('label')?.innerText||question;
+   value=group.filter(x=>x.checked).map(x=>Array.from(x.labels||[]).map(l=>l.innerText).join(' ').trim()||x.value).join('; ');
   }else if(type==='select'){options=Array.from(el.options).filter(o=>o.value&&!o.disabled).map(o=>o.textContent.trim())}
   else if(type==='checkbox'){options=['Yes','No'];value=el.checked?'Yes':'No'}
   out.push({index,indices,ref:reference(el),refs:indices.map(i=>reference(controls[i])),label:question.replace(/\s+/g,' ').trim(),type,options,
@@ -61,14 +78,15 @@ SNAPSHOT=r"""selector => {
  });return out;
 }"""
 CONFIRMED=re.compile(r"thank you for (?:your interest|applying|submitting)|application (?:has been |was )?(?:successfully )?(?:submitted|received)|we (?:have |have successfully )?received your application",re.I)
+REJECTED=re.compile(r"we couldn.t submit your application[\s\S]*your application submission was flagged as possible spam",re.I)
 LOGIN=re.compile(r"sign in to (?:apply|continue)|log in to (?:apply|continue)|create (?:an |your )account|verify your (?:email|identity)|enter (?:the |your )?(?:verification|one.time|security) code",re.I)
 
 
 class Browser:
     def __init__(self,store,test_url=None):
         self.store=store; self.test_url=test_url; self.context=None; self.playwright=None
-        self.page=None; self.aid=None; self.attempted=False; self.current_host=""; self.host_cache={}; self.denied_write=False; self.upload_payloads={}; self.uploaded_files=set()
-        self.auth_write=None
+        self.page=None; self.aid=None; self.attempted=False; self.current_host=""; self.host_cache={}; self.denied_write=False; self.denied_request=None; self.upload_payloads={}; self.uploaded_files=set()
+        self.auth_write=None;self.ashby_file_handles={};self.ashby_attached_files=set()
 
     def __enter__(self):
         from playwright.sync_api import sync_playwright
@@ -126,6 +144,8 @@ class Browser:
         if host in UPLOAD_HOSTS:
             payload=getattr(route.request,'post_data_buffer',None) or b''
             approved=self.current_host in {'boards.greenhouse.io','job-boards.greenhouse.io','boards.eu.greenhouse.io','job-boards.eu.greenhouse.io'} and route.request.method=='POST' and any(data in payload or h.encode() in payload for h,data in self.upload_payloads.items())
+            approved=approved or (host==ASHBY_UPLOAD_HOST and self.current_host=='jobs.ashbyhq.com'
+                                  and route.request.method=='POST' and any(data in payload or (h+'.pdf').encode() in payload for h,data in self.upload_payloads.items()))
             return route.continue_() if approved else route.abort()
         # No arbitrary website can receive personal values through an injected pixel or redirect.
         asset_hosts={"www.google.com","www.gstatic.com","fonts.googleapis.com","fonts.gstatic.com",
@@ -151,23 +171,74 @@ class Browser:
             if host not in allowed:return route.abort()
             if not self.attempted and host not in {"www.google.com","www.recaptcha.net","recaptcha.google.com"}:
                 payload=route.request.post_data or ""
-                reading=False
+                reading=False;data=None
                 try:
                     data=json.loads(payload)
                     queries=data if isinstance(data,list) else [data]
                     reading=all(isinstance(q,dict) and isinstance(q.get('query'),str) and re.match(r'^\s*query\b',q['query']) for q in queries)
                 except (ValueError,TypeError):pass
+                if host==self.current_host=='jobs.ashbyhq.com' and p.path=='/api/non-user-graphql' and isinstance(data,dict):
+                    variables=data.get('variables',{})
+                    if (data.get('operationName')=='ApiCreateFileUploadHandle'
+                            and isinstance(data.get('query'),str)
+                            and re.match(r'^\s*mutation\s+ApiCreateFileUploadHandle\b',data['query'])
+                            and isinstance(variables,dict)):
+                        filename=variables.get('filename')
+                        uploading_document=next((blob for h,blob in self.upload_payloads.items() if filename==h+'.pdf'),None)
+                        reading=bool(uploading_document and variables.get('contentType')=='application/pdf'
+                                     and variables.get('contentLength')==len(uploading_document))
+                if (host==self.current_host=='jobs.ashbyhq.com' and p.path=='/api/non-user-graphql'
+                        and isinstance(data,dict) and data.get('operationName')=='ApiSetFormValueToFile'
+                        and isinstance(data.get('query'),str)
+                        and re.match(r'^\s*mutation\s+ApiSetFormValueToFile\b',data['query'])):
+                    variables=data.get('variables',{})
+                    handle=variables.get('fileHandle') if isinstance(variables,dict) else None
+                    reading=isinstance(handle,str) and self.ashby_file_handles.get(handle) in self.uploaded_files
                 # Upload-only requests are permitted on known ATS upload paths, never arbitrary mutations.
                 reading=reading or p.path=='/uncacheable_attributes/presigned_fields'
                 passive_check=p.path.startswith("/cdn-cgi/challenge-platform/")
                 uploading=bool(re.search(r'/(?:upload|uploads|files|attachments|documents)(?:/|\?|$)',p.path,re.I))
                 if not reading and not uploading and not passive_check:
-                    self.denied_write=True
+                    # Ashby autosaves even untouched/null fields on form hydration.
+                    # Suppress the save without treating it as a submission attempt;
+                    # local control values are still verified before final submit.
+                    autosave=(host==self.current_host=='jobs.ashbyhq.com'
+                              and p.path=='/api/non-user-graphql'
+                              and bool(queries if isinstance(data,(dict,list)) else [])
+                              and all(isinstance(q,dict) and (
+                                  isinstance(q.get('query'),str) and re.match(r'^\s*query\b',q['query']) or
+                                  q.get('operationName')=='ApiSetFormValue' and isinstance(q.get('query'),str) and re.match(r'^\s*mutation\s+ApiSetFormValue\b',q['query'])
+                              ) for q in queries))
+                    detail={'host':host,'path':p.path,'method':route.request.method}
+                    if isinstance(data,dict):detail['operation']=str(data.get('operationName',''))[:100]
+                    elif isinstance(data,list):detail['operations']=[str(x.get('operationName',''))[:100] for x in data if isinstance(x,dict)]
+                    if autosave:
+                        self.store.event('draft_autosave_suppressed',None,detail)
+                    else:
+                        self.denied_write=True;self.denied_request=detail
+                        self.store.event('request_blocked',None,detail)
                     return route.abort()
         return route.continue_()
 
     def _upload_response(self,response):
         request=response.request
+        if (request.method=='POST' and self.current_host=='jobs.ashbyhq.com'
+                and urlsplit(request.url).hostname=='jobs.ashbyhq.com'
+                and urlsplit(request.url).path=='/api/non-user-graphql' and 200<=response.status<300):
+            try:
+                query=json.loads(request.post_data or '{}')
+                if not isinstance(query,dict) or query.get('operationName') not in ('ApiCreateFileUploadHandle','ApiSetFormValueToFile'):return
+                result=response.json()
+                variables=query.get('variables',{})
+                if query.get('operationName')=='ApiCreateFileUploadHandle':
+                    h=next((h for h in self.upload_payloads if variables.get('filename')==h+'.pdf'),None)
+                    handle=result.get('data',{}).get('fileUploadHandle',{}).get('handle')
+                    if h and isinstance(handle,str):self.ashby_file_handles[handle]=h
+                elif query.get('operationName')=='ApiSetFormValueToFile':
+                    h=self.ashby_file_handles.get(variables.get('fileHandle'))
+                    if h in self.uploaded_files and not result.get('errors') and result.get('data',{}).get('setFormValueToFile'):
+                        self.ashby_attached_files.add(h)
+            except Exception:pass  # Late responses may arrive while the context closes.
         if request.method!='POST' or urlsplit(request.url).hostname not in UPLOAD_HOSTS or not 200<=response.status<300:return
         payload=request.post_data_buffer or b''
         for h,data in self.upload_payloads.items():
@@ -184,7 +255,7 @@ class Browser:
 
     def _guard(self,job,allow_verification=False):
         if not self.attempted:self.store.checkpoint()
-        if self.denied_write:raise Blocked("unapproved_draft_write","An unsupported page attempted to save data before submit authorization")
+        if self.denied_write:raise Blocked("unapproved_draft_write","Unrecognized pre-submit request blocked: "+json.dumps(self.denied_request or {},sort_keys=True))
         url=self.page.url; host=urlsplit(url).hostname
         if self.test_url and url.startswith(self.test_url):pass
         elif host!=self.current_host:
@@ -198,12 +269,34 @@ class Browser:
         if REFUSE.search(text):raise Blocked("human_work_sample")
         return text
 
+    def _wait_submission_outcome(self,job,accept_verification=True):
+        # ATS processing routinely exceeds one second, especially on the Pi.
+        deadline=time.monotonic()+45
+        while True:
+            text=self._guard(job,allow_verification=True)
+            if REJECTED.search(text):return text
+            if CONFIRMED.search(text) and not self.page.locator('input[type=email]').count():return text
+            if accept_verification and self._email_verification(text):return text
+            if self.page.locator('[aria-invalid=true]').count():return text
+            if time.monotonic()>=deadline:return text
+            self.page.wait_for_timeout(500)
+
     def _email_verification(self, text):
         return bool(re.search(r'verification code was sent.{0,300}to submit your application',text,re.I|re.S)
                     and self.page.get_by_label('Security code',exact=True).count())
 
+    def _outcome_screenshot(self,path,**kwargs):
+        try:
+            self.page.screenshot(path=str(path),type='jpeg',full_page=True,timeout=5000,**kwargs)
+            return path.name
+        except Exception as e:
+            self.store.event('screenshot_failed',self.aid,{'type':type(e).__name__})
+            return ''
+
     def _continue_email_verification(self,job,submit):
-        if not self.store.settings()['gmail_verification']:return 'awaiting_verification'
+        if not self.store.settings()['gmail_verification']:
+            self.store.event('verification_held',self.aid,{'reason':'gmail_verification_disabled'})
+            return 'awaiting_verification'
         greenhouse={'boards.greenhouse.io','job-boards.greenhouse.io','boards.eu.greenhouse.io','job-boards.eu.greenhouse.io'}
         if not self.test_url and job['host'] not in greenhouse:return 'awaiting_verification'
         from .gmail import GmailClient
@@ -236,16 +329,15 @@ class Browser:
         self.store.checkpoint()
         self.store.begin_verification(self.aid)
         submit.click(timeout=15000)
-        self.page.wait_for_timeout(1200)
-        text=self._guard(job,allow_verification=True)
+        text=self._wait_submission_outcome(job,accept_verification=False)
         screenshot=self.store.root/'screenshots'/(self.aid+'-verified.jpg')
         # A rejected code may remain visible. Do not persist it in screenshots/text.
         screenshot_kwargs={'mask':[control]} if control.count() else {}
-        self.page.screenshot(path=str(screenshot),type='jpeg',full_page=True,**screenshot_kwargs)
+        screenshot_name=self._outcome_screenshot(screenshot,**screenshot_kwargs)
         text=text.replace(code,'[verification code redacted]')
         confirmed=CONFIRMED.search(text) and not self.page.locator('input[type=email]').count()
         outcome='confirmed' if confirmed else 'awaiting_verification' if self._email_verification(text) else 'unknown'
-        self.store.finish(self.aid,outcome,text,screenshot.name)
+        self.store.finish(self.aid,outcome,text,screenshot_name)
         return outcome
 
     def _snapshot(self):
@@ -333,7 +425,10 @@ class Browser:
         f=answer['field']; value=answer['value']; controls=self.page.locator(CONTROLS)
         el=self._control(f)
         if f['type']=='select':el.select_option(label=value)
+        elif f['type']=='yesno':self._control(f,f['options'].index(value)).click()
         elif f['type']=='radio':self._control(f,f['options'].index(value)).check()
+        elif f['type']=='checkbox-group':
+            for i,option in enumerate(f['options']):self._control(f,i).set_checked(option==value)
         elif f['type']=='checkbox':el.set_checked(value=='Yes')
         elif f['type']=='combobox':
             el.click()
@@ -356,22 +451,37 @@ class Browser:
             if f['type']=='select':actual=el.locator('option:checked').inner_text().strip()
             elif f['type']=='radio':
                 actual=next((f['options'][i] for i,index in enumerate(f['indices']) if self._control(f,i).is_checked()),'')
+            elif f['type']=='checkbox-group':
+                actual='; '.join(f['options'][i] for i in range(len(f['indices'])) if self._control(f,i).is_checked())
             elif f['type']=='checkbox':actual='Yes' if el.is_checked() else 'No'
+            elif f['type']=='yesno':actual=next((x['value'] for x in fresh if x['label']==f['label'] and x['type']=='yesno'),'')
             elif f['type']=='combobox':actual=next((x['value'] for x in fresh if x['label']==f['label'] and x['type']=='combobox'),'')
             else:actual=el.input_value()
             if a['provenance'].get('fact_key')=='phone':
                 actual=re.sub(r'[^0-9]','',actual);value=re.sub(r'[^0-9]','',value)
             if actual!=value:raise Blocked('field_verification_failed',f['label'])
         for d in documents:
+            if self.current_host in {'boards.greenhouse.io','job-boards.greenhouse.io','boards.eu.greenhouse.io','job-boards.eu.greenhouse.io'} and d['hash'] not in self.uploaded_files:
+                raise Blocked('upload_verification_failed','Greenhouse has not acknowledged the approved PDF upload')
+            if self.current_host=='jobs.ashbyhq.com' and (d['hash'] not in self.uploaded_files or d['hash'] not in self.ashby_attached_files):
+                raise Blocked('upload_verification_failed','The approved PDF did not receive a successful upload response')
             if d['hash'] in self.uploaded_files and d['filename'] in body:continue
             el=self._control(d['field'])
             sizes=el.evaluate('(e)=>Array.from(e.files||[]).map(f=>f.size)')
             expected=safe_document(self.store.root/'documents'/d['filename'],self.store.root/'documents').stat().st_size
             if sizes!=[expected] and not (d['hash'] in self.uploaded_files and d['filename'] in self.page.locator('body').inner_text()):raise Blocked('upload_verification_failed')
-        if self.page.locator('[aria-invalid=true]').count() or not self.page.evaluate('() => Array.from(document.forms).every(f=>f.checkValidity())'):raise Blocked('invalid_fields')
+        if self.page.locator('[aria-invalid=true]').count() or not self.page.evaluate('''() => Array.from(document.forms).every(f=>Array.from(f.elements).every(e=>{
+            if(e.type==='checkbox' && e.name && e.getAttribute('description')){
+                const group=Array.from(f.elements).filter(x=>x.type==='checkbox'&&x.name===e.name&&x.getAttribute('description')===e.getAttribute('description'));
+                // Greenhouse marks each option required, but requires a group answer.
+                if(group.length>1)return !group.some(x=>x.required)||group.some(x=>x.checked);
+            }
+            return !e.checkValidity||e.checkValidity();
+        }))'''):raise Blocked('invalid_fields')
 
     def apply(self,job,live=True):
-        self.aid=None; self.attempted=False; self.denied_write=False; self.upload_payloads={}; self.uploaded_files=set();self.auth_write=None
+        self.aid=None; self.attempted=False; self.denied_write=False; self.denied_request=None; self.upload_payloads={}; self.uploaded_files=set();self.auth_write=None;self.ashby_file_handles={};self.ashby_attached_files=set()
+        self.store.check_job_decision(job['id'])
         self.current_host=job['host']
         if self.test_url:self.current_host=urlsplit(self.test_url).hostname
         elif job['host'] not in ATS_HOSTS|PORTAL_HOSTS:raise Blocked('unapproved_destination')
@@ -426,7 +536,7 @@ class Browser:
                 try:
                     from .provider import LazyProvider
                     provider=LazyProvider(self.store.settings()['model_timeout_seconds'],store=self.store,checkpoint=self.store.checkpoint,observer=lambda stage,detail:self.store.event(stage,job['id'],detail))
-                    a=resolve(self.store,job['answer_scope'],f,provider,context={**job,'form_questions':[x['label'] for x in fields],'previous_templates':[x['provenance']['template_id'] for x in answers if 'template_id' in x['provenance']]})
+                    a=resolve(self.store,job['answer_scope'],f,provider,context={**job,'form_questions':[x['label'] for x in fields],'previous_templates':[x['provenance']['template_id'] for x in answers if 'template_id' in x['provenance']], 'previous_writing':[{'question':x['field']['label'],'answer':x['value']} for x in answers if 'sample_parts' in x['provenance'] or 'template_id' in x['provenance']]})
                     if a:
                         answers.append(a)
                         self.store.event('field_answered',job['id'],{'label':f['label'],'value':a['value'],'provenance':a['provenance']})
@@ -446,6 +556,10 @@ class Browser:
                 self._control(d['field']).set_input_files(str(path))
             if documents:
                 with contextlib.suppress(Exception):self.page.wait_for_load_state('networkidle',timeout=8000)
+                if self.current_host in {'jobs.ashbyhq.com','boards.greenhouse.io','job-boards.greenhouse.io','boards.eu.greenhouse.io','job-boards.eu.greenhouse.io'}:
+                    deadline=time.monotonic()+20
+                    while any(d['hash'] not in self.uploaded_files for d in documents) and time.monotonic()<deadline:
+                        self.store.checkpoint();self.page.wait_for_timeout(250)
             for a in answers:
                 self.store.checkpoint()
                 self.store.event('field_filling',job['id'],{'label':a['field']['label']})
@@ -475,22 +589,25 @@ class Browser:
             self.store.checkpoint()
             self.store.begin_submit(self.aid); self.attempted=True
             requested=time.time()
+            stage='submit_click'
             try:
                 submit.click(timeout=15000)
-                self.page.wait_for_timeout(1200)
-                text=self._guard(job,allow_verification=True)
+                stage='outcome_wait'
+                text=self._wait_submission_outcome(job)
+                stage='outcome_evidence'
                 screenshot=self.store.root/'screenshots'/(self.aid+'-after.jpg')
-                self.page.screenshot(path=str(screenshot),type='jpeg',full_page=True)
+                screenshot_name=self._outcome_screenshot(screenshot)
                 confirmed=CONFIRMED.search(text) and not self.page.locator('input[type=email]').count()
-                outcome='confirmed' if confirmed else 'awaiting_verification' if self._email_verification(text) else 'unknown'
+                outcome='not_submitted' if REJECTED.search(text) else 'confirmed' if confirmed else 'awaiting_verification' if self._email_verification(text) else 'unknown'
                 evidence=text if outcome=='awaiting_verification' else text[:4000]
                 if outcome=='awaiting_verification':
                     self.store.db.execute('INSERT OR REPLACE INTO verification_challenges VALUES(?,?,?,?,?,?,?,0)',
                         (self.aid,'greenhouse',self.page.url,job['company'],requested,8,'pending'))
-                self.store.finish(self.aid,outcome,evidence,screenshot.name)
+                self.store.finish(self.aid,outcome,evidence,screenshot_name)
                 if outcome=='awaiting_verification':return self._continue_email_verification(job,submit)
                 return outcome
             except Exception as e:
+                self.store.event('submission_error',self.aid,{'stage':stage,'type':type(e).__name__})
                 outcome=self.store.db.execute('SELECT state FROM applications WHERE id=?',(self.aid,)).fetchone()
                 if outcome and outcome[0]=='submitting':self.store.finish(self.aid,'unknown',f'{type(e).__name__}: outcome requires verification')
                 if isinstance(e,Blocked) and e.reason=='paused':raise

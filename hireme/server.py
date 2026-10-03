@@ -401,6 +401,8 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     elif path=='/api/company-allow':
                         from .company_controls import allow_company
                         result=allow_company(store,data['id'])
+                    elif path=='/api/job-decision':
+                        store.decide_job(data['id'],data['decision']);result={'saved':True}
                     elif path=='/api/job':
                         from .discovery import posting
                         job=posting(data['url'],data['company'],data['title'],data['location'],'user',data.get('description',''))

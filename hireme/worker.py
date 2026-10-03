@@ -33,11 +33,13 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,
                 store.checkpoint(); sweep_lists(store)
                 store.checkpoint(); sweep_portals(store)
                 store.checkpoint(); sweep_boards(store,repo)
-            rows=list(store.db.execute("SELECT * FROM jobs WHERE status IN ('discovered','blocked','prepared') ORDER BY score DESC,first_seen DESC"))
+            query="SELECT * FROM jobs WHERE status IN ('discovered','blocked','prepared') AND id NOT IN (SELECT job_id FROM job_decisions)"
+            selected=tuple(job_ids or ())
+            if selected:query+=' AND id IN ('+','.join('?' for _ in selected)+')'
+            rows=list(store.db.execute(query+' ORDER BY score DESC,first_seen DESC',selected))
             ranked=[]
             for row in rows:
                 store.checkpoint()
-                if job_ids and row['id'] not in job_ids:continue
                 job=json.loads(row['payload'])
                 try:
                     score,evidence=eligible(job,s,store.facts())
@@ -59,12 +61,13 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,
                             if count>=target or (max_attempts is not None and attempts>=max_attempts):break
                             store.checkpoint()
                             try:
+                                store.check_job_decision(job['id'])
                                 attempts+=1
                                 store.event('application_started',job['id'],{'run_id':rid,'attempt':attempts,'company':job['company'],'title':job['title']})
                                 outcome=browser.apply(job,live=live)
                                 outcomes[outcome]=outcomes.get(outcome,0)+1
                                 store.event('application_finished',job['id'],{'run_id':rid,'outcome':outcome})
-                                store.db.execute('UPDATE jobs SET status=? WHERE id=?',(outcome,job['id']))
+                                store.db.execute('UPDATE jobs SET status=? WHERE id=? AND id NOT IN (SELECT job_id FROM job_decisions)',(outcome,job['id']))
                                 if outcome=='confirmed' or not live and outcome=='prepared':count+=1
                             except Blocked as e:
                                 if e.reason in ('paused','cycle_timeout','model_budget_exhausted','provider_rate_limited'):raise
@@ -79,7 +82,7 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,
                                 reasons['browser_error']=reasons.get('browser_error',0)+1
                                 store.block(job['id'],'browser_error',type(e).__name__)
             store.checkpoint()
-            detail=json.dumps({'target':target,'attempts':attempts,'outcomes':outcomes,'confirmed':count,'prepared':count if not live else 0,'shortfall':max(0,target-count),'reasons':reasons,'mode':'live' if live else 'prepare'})
+            detail=json.dumps({'target':target,'attempts':attempts,'outcomes':outcomes,'confirmed':count if live else 0,'prepared':count if not live else 0,'shortfall':max(0,target-count),'reasons':reasons,'mode':'live' if live else 'prepare'})
             store.db.execute("UPDATE runs SET finished=?,status='finished',submitted=?,detail=? WHERE id=?",(now(),count if live else 0,detail,rid))
             return json.loads(detail)
         except Exception as e:

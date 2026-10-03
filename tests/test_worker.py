@@ -54,6 +54,17 @@ def test_pause_then_resume_does_not_revive_old_cycle(store):
     with pytest.raises(Blocked,match='paused'):store.checkpoint()
 
 
+def test_preparation_is_not_reported_as_confirmed_submission(store,job):
+    class FakeBrowser:
+        def __init__(self,s):pass
+        def __enter__(self):return self
+        def __exit__(self,*a):pass
+        def apply(self,j,live=True):assert not live;return 'prepared'
+    result=cycle(store,Path('.'),discover=False,live=False,limit=1,browser_factory=FakeBrowser)
+    assert result['confirmed']==0 and result['prepared']==1 and result['shortfall']==0
+    assert store.db.execute('SELECT submitted FROM runs').fetchone()[0]==0
+
+
 def test_observed_cycle_has_hard_attempt_limit_and_job_selection(store,job):
     selected=[]
     for i in range(5):

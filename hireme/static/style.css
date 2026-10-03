@@ -1904,3 +1904,14 @@ pre {
     flex-basis: 100%;
   }
 }
+
+.job-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+.job-actions button {
+  font-size: 12px;
+  padding: 8px 10px;
+}

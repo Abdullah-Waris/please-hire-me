@@ -246,3 +246,104 @@ def test_city_autocomplete_alias_preserves_location(store):
     field={'label':'Location (City)*','type':'combobox','required':True,'options':['Berkeley, California, United States'],'maxlength':-1}
     assert resolve(store,'job-boards.greenhouse.io',field)['value']=='Berkeley, California, United States'
     with pytest.raises(Blocked):resolve(store,'job-boards.greenhouse.io',{**field,'options':['Berkeley, England, United Kingdom']})
+
+
+@pytest.mark.parametrize('label',[
+    'Why are you excited about Lightfield and this role?',
+    'What makes you excited about Koah?',
+    'Describe your prior experience, if any, with Nvidia Cosmos or a comparable world foundation model.',
+])
+def test_batch_writing_wording_uses_grounded_drafting(store,job,label):
+    store.update_settings({'tailored_writing':True})
+    store.put_template('experience','I built Python services for manufacturing workflows.')
+    class Model:
+        def draft_answer(self,question,choices,context,maxlength):
+            assert context['single_line']
+            return {'answer':'I built Python services.\nI want to apply that experience to this role.',
+                    'sentence_ids':[choices[0]['id']]}
+    answer=resolve(store,job['host'],field(label),Model(),context=job)
+    assert '\n' not in answer['value']
+    assert answer['provenance']['tailored']
+    assert resolve(store,job['host'],field(label),context=job)==answer
+
+
+def test_batch_option_only_labels_use_confirmed_locality_and_discovery(store,job):
+    store.update_settings({'contextual_preferences':True})
+    store.put_facts({'onsite':'Yes','location':'Berkeley, CA'})
+    offices=['San Francisco HQ - 181 Fremont Street','New York City - 1 World Trade']
+    assert resolve(store,job['host'],field('; '.join(offices),'radio',offices),context=job)['value']==offices[0]
+    options=['LinkedIn','Indeed','News article or press coverage','AI chat bot','Search engine','Social media','Other']
+    result=resolve(store,job['host'],field('; '.join(options),'radio',options),context={**job,'source':'ash:koahlabs'})
+    assert result['value']=='Other'
+    with pytest.raises(Blocked):
+        resolve(store,job['host'],field('; '.join(options),'radio',options),context={**job,'source':'user'})
+
+
+def test_no_ai_application_question_still_requires_human(store,job):
+    with pytest.raises(Blocked,match='human_work_sample'):
+        resolve(store,job['host'],field("Tell me about the most exciting project you've built (please type answer without AI)"))
+
+
+def test_relocation_need_uses_current_location_not_willingness(store,job):
+    store.update_settings({'contextual_preferences':True})
+    store.put_facts({'location':'Berkeley, CA','relocate':'Yes'})
+    question=field('Do you require relocation to the SF Bay Area?','radio',['Yes','No'])
+    assert resolve(store,job['host'],question,context=job)['value']=='No'
+    store.put_facts({'location':'Boston, MA'})
+    with pytest.raises(Blocked):resolve(store,job['host'],question,context=job)
+
+
+def test_hq_work_question_uses_confirmed_onsite_preference(store,job):
+    store.put_facts({'onsite':'Yes'})
+    question=field('Can you work from our San Francisco HQ (4 days a week)?','radio',['Yes','No'])
+    assert resolve(store,job['host'],question,context=job)['value']=='Yes'
+
+
+def test_current_location_wording_uses_verified_geographic_option(store,job):
+    store.put_facts({'location':'Berkeley, CA'})
+    question=field('Where are you currently located?','combobox',['Berkeley, California, United States','Boston, Massachusetts, United States'])
+    assert resolve(store,job['host'],question,context=job)['value']=='Berkeley, California, United States'
+
+
+def test_combined_bay_area_and_onsite_question_needs_both_facts(store,job):
+    store.update_settings({'contextual_preferences':True})
+    store.put_facts({'location':'Berkeley, CA','onsite':'Yes'})
+    options=["Yes, I'm currently located in the Bay Area and am open to work 5 days a week in-office", "No, but I'm planning to relocate to the Bay Area", "No, but I'm open to relocating to the Bay Area", "No, and I am not open to relocation"]
+    question=field('Are you currently located in the San Francisco Bay Area and able to work from our office 5 days per week?','radio',options)
+    assert resolve(store,job['host'],question,context=job)['value']==options[0]
+    store.put_facts({'location':'Boston, MA'})
+    with pytest.raises(Blocked):resolve(store,job['host'],question,context=job)
+
+
+def test_tailored_answers_can_use_resume_without_separate_templates_and_revalidate_hash(store,job):
+    from reportlab.pdfgen import canvas
+    import io,hashlib
+    stream=io.BytesIO();c=canvas.Canvas(stream)
+    c.drawString(40,700,'Built Python services and reduced processing time by 20 percent.')
+    c.save();data=stream.getvalue();h=hashlib.sha256(data).hexdigest()
+    (store.root/'documents'/(h+'.pdf')).write_bytes(data)
+    store.db.execute("UPDATE documents SET hash=?,filename=? WHERE kind='resume'",(h,h+'.pdf'))
+    store.update_settings({'tailored_writing':True})
+    class Model:
+        def draft_answer(self,label,choices,context,maxlength):
+            source=next(x for x in choices if 'resume_hash' in x)
+            return {'answer':source['text'],'sentence_ids':[source['id']]}
+    f=field('First example:','textarea')
+    answer=resolve(store,job['host'],f,Model(),context=job)
+    assert answer['provenance']['sample_parts'][0]['resume_hash']==h
+    assert resolve(store,job['host'],f,context=job)==answer
+    (store.root/'documents'/(h+'.pdf')).write_bytes(data+b'changed')
+    with pytest.raises(Blocked):resolve(store,job['host'],f,context=job)
+
+
+def test_multiline_template_formats_for_text_and_validates_before_submit(store,job,package):
+    store.put_template('motivation','I build Python services.\nI enjoy improving their reliability.')
+    f=field('Why do you want this role?')
+    answer=resolve(store,job['host'],f,context=job)
+    assert '\n' not in answer['value']
+    package['answers']=[answer];package['steps']=[]
+    validate_package(store,job,package)
+
+
+def test_graduation_year_is_derived_from_confirmed_month(store,job):
+    assert resolve(store,job['host'],field('What year will you graduate?','select',['2027','2028','2029']))['value']=='2028'

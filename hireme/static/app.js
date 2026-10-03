@@ -821,6 +821,8 @@ function empty(parent, text, title = "Nothing here yet", symbol = "◇") {
   parent.append(box);
 }
 const statusLabels = {
+  manually_applied: "Applied manually",
+  skipped: "Don’t apply",
   confirmed: "Submitted",
   blocked: "Needs action",
   unknown: "Uncertain",
@@ -1336,6 +1338,62 @@ function renderEvidence(app, parent) {
   }
 }
 
+function jobActions(job, cell, app) {
+  if (
+    app &&
+    ["confirmed", "submitting", "unknown", "awaiting_verification"].includes(
+      app.state,
+    )
+  )
+    return;
+  const actions = ["manually_applied", "skipped"].includes(job.status)
+    ? [["undo", "Undo"]]
+    : [
+        ["manually_applied", "Applied manually"],
+        ["skipped", "Don’t apply"],
+      ];
+  const buttons = el("div", undefined, "job-actions");
+  for (const [decision, label] of actions) {
+    const button = el("button", label, "secondary");
+    button.type = "button";
+    button.disabled = state.demo;
+    button.setAttribute(
+      "aria-label",
+      `${label}: ${job.company} — ${job.title}`,
+    );
+    button.onclick = async () => {
+      const originView = view;
+      buttons
+        .querySelectorAll("button")
+        .forEach((control) => (control.disabled = true));
+      try {
+        await api("/api/job-decision", { id: job.id, decision });
+        await refresh();
+        note(
+          decision === "undo"
+            ? "Job returned to the queue."
+            : decision === "skipped"
+              ? "Job skipped. It will not be attempted."
+              : "Manual application recorded. It will not be attempted.",
+        );
+        if (view === originView && document.activeElement === document.body) {
+          const target = $("#jobs");
+          target.focus({ preventScroll: true });
+        }
+      } catch (error) {
+        buttons
+          .querySelectorAll("button")
+          .forEach((control) => (control.disabled = state.demo));
+        note(error.message, true);
+        if (view === originView && document.activeElement === document.body)
+          button.focus({ preventScroll: true });
+      }
+    };
+    buttons.append(button);
+  }
+  cell.append(buttons);
+}
+
 function table(jobs, parent, filtered = false) {
   const focusedEvidence =
     parent.contains(document.activeElement) &&
@@ -1449,7 +1507,17 @@ function table(jobs, parent, filtered = false) {
       };
       detail.open = expandedEvidence.has(expansionKey);
       d.append(detail);
-    } else d.append(el("span", "No attempt yet", "subtle"));
+    } else
+      d.append(
+        el(
+          "span",
+          job.status === "manually_applied"
+            ? "Recorded by you"
+            : "No attempt yet",
+          "subtle",
+        ),
+      );
+    jobActions(job, d, app);
     if (job.reason) {
       const diagnostic = el("details", undefined, "diagnostic");
       diagnostic.dataset.evidenceId = "diagnostic:" + job.id;

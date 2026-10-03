@@ -55,6 +55,8 @@ CREATE TABLE IF NOT EXISTS jobs (id TEXT PRIMARY KEY, company TEXT NOT NULL, com
  title TEXT NOT NULL, url TEXT UNIQUE NOT NULL, host TEXT NOT NULL, source TEXT NOT NULL,
  payload TEXT NOT NULL, score INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'discovered',
  reason TEXT NOT NULL DEFAULT '', first_seen TEXT NOT NULL, updated TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS job_decisions (job_id TEXT PRIMARY KEY, decision TEXT NOT NULL,
+ previous_status TEXT NOT NULL, created TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS applications (id TEXT PRIMARY KEY, job_id TEXT NOT NULL UNIQUE,
  company_key TEXT NOT NULL, state TEXT NOT NULL, package TEXT NOT NULL, hash TEXT NOT NULL,
  created TEXT NOT NULL, updated TEXT NOT NULL, attempted TEXT, confirmation TEXT, screenshot TEXT);
@@ -365,8 +367,32 @@ class Store:
         s=self.settings() if settings is None else settings
         return company_normalizer(s['company_aliases'])(name)
 
+    def decide_job(self, jid, decision):
+        if decision not in ('manually_applied','skipped','undo'):
+            raise ValueError('Choose applied manually, do not apply, or undo')
+        with self.transaction():
+            job=self.db.execute('SELECT * FROM jobs WHERE id=?',(jid,)).fetchone()
+            if not job:raise ValueError('Job not found')
+            app=self.db.execute('SELECT state FROM applications WHERE job_id=?',(jid,)).fetchone()
+            if app and app[0] in ('submitting','unknown','awaiting_verification','confirmed'):
+                raise ValueError('This application already has a submission record; reconcile uncertain outcomes first')
+            previous=self.db.execute('SELECT * FROM job_decisions WHERE job_id=?',(jid,)).fetchone()
+            if decision=='undo':
+                if not previous:raise ValueError('No manual decision to undo')
+                self.db.execute('DELETE FROM job_decisions WHERE job_id=?',(jid,))
+                self.db.execute("UPDATE jobs SET status='discovered',reason='',updated=? WHERE id=?",(now(),jid))
+            else:
+                self.db.execute("INSERT INTO job_decisions VALUES(?,?,?,?) ON CONFLICT(job_id) DO UPDATE SET decision=excluded.decision,created=excluded.created",
+                    (jid,decision,job['status'],now()))
+                self.db.execute("UPDATE jobs SET status=?,reason='',updated=? WHERE id=?",(decision,now(),jid))
+            self.event('job_decision',jid,{'decision':decision})
+
+    def check_job_decision(self, jid):
+        decision=self.db.execute('SELECT decision FROM job_decisions WHERE job_id=?',(jid,)).fetchone()
+        if decision:raise Blocked(decision[0])
+
     def block(self, jid, reason, detail=""):
-        self.db.execute("UPDATE jobs SET status='blocked',reason=?,updated=? WHERE id=?",(reason + (": " + detail if detail else ""),now(),jid))
+        self.db.execute("UPDATE jobs SET status='blocked',reason=?,updated=? WHERE id=? AND id NOT IN (SELECT job_id FROM job_decisions)",(reason + (": " + detail if detail else ""),now(),jid))
         self.event("blocked",jid,{"reason":reason,"detail":detail})
 
     def application_history(self, settings=None, states=None):
@@ -390,10 +416,15 @@ class Store:
         return history
 
     def _check_budget(self, job, s):
+        self.check_job_decision(job["id"])
         ck=self.company(job["company"],s)
         if ck in {self.company(x,s) for x in s["skip_companies"]+s["interview_companies"]}:
             raise Blocked("company_blocked")
         all_active=self.application_history(s,('submitting','unknown','confirmed','awaiting_verification'))
+        manual=[{'state':'manually_applied','created':r['created'],'attempted':r['created'],
+                 'company_keys':{self.company(r['company'],s)}}
+                for r in self.db.execute("SELECT d.created,j.company FROM job_decisions d JOIN jobs j ON j.id=d.job_id WHERE d.decision='manually_applied'")]
+        all_active.extend(manual)
         active=[row for row in all_active if ck in row['company_keys']]
         if any(r["state"]=="awaiting_verification" for r in active):
             raise Blocked("company_verification_pending","Complete the earlier application verification first")
@@ -462,7 +493,7 @@ class Store:
             self.event('verification_intent',aid,{})
 
     def finish(self, aid, state, confirmation="", screenshot=""):
-        if state not in ("confirmed","unknown","awaiting_verification"):
+        if state not in ("confirmed","unknown","awaiting_verification","not_submitted"):
             raise ValueError("Invalid outcome")
         with self.transaction():
             r=self.db.execute("SELECT state,job_id FROM applications WHERE id=?",(aid,)).fetchone()
@@ -471,7 +502,7 @@ class Store:
             self.db.execute("UPDATE applications SET state=?,updated=?,confirmation=?,screenshot=? WHERE id=?",
                             (state,now(),confirmation[-4000:],screenshot,aid))
             self.db.execute("UPDATE jobs SET status=?,reason=?,updated=? WHERE id=?",
-                            (state,"" if state=="confirmed" else "Email verification required; application not yet submitted" if state=="awaiting_verification" else "Submission outcome needs reconciliation",now(),r[1]))
+                            (state,"" if state=="confirmed" else "Employer rejected submission; manual action required" if state=='not_submitted' else "Email verification required; application not yet submitted" if state=="awaiting_verification" else "Submission outcome needs reconciliation",now(),r[1]))
             self.db.execute("UPDATE verification_challenges SET state=? WHERE application_id=?",('complete' if state=='confirmed' else 'held' if state=='unknown' else 'pending',aid))
             self.event(state,aid,{"confirmation":confirmation[-4000:],"screenshot":screenshot})
 
@@ -499,6 +530,19 @@ class Store:
             self.event("human_reconciliation",aid,{"submitted":submitted,"note":note})
         # A not-submitted outcome is deliberately not retried automatically.
 
+    def retry_not_submitted(self, aid, note):
+        if not isinstance(note,str) or len(note.strip())<10:raise ValueError('Explain why this application can be retried')
+        with self.transaction():
+            app=self.db.execute('SELECT * FROM applications WHERE id=?',(aid,)).fetchone()
+            if not app or app['state']!='not_submitted':raise ValueError('Reconcile as not submitted before retrying')
+            self.check_job_decision(app['job_id'])
+            # Preserve the entire prior attempt before freeing the unique job slot.
+            self.event('application_retry_requested',aid,{'previous_application':dict(app),'note':note})
+            self.db.execute('DELETE FROM verification_challenges WHERE application_id=?',(aid,))
+            self.db.execute('DELETE FROM applications WHERE id=?',(aid,))
+            self.db.execute("UPDATE jobs SET status='discovered',reason='',updated=? WHERE id=?",(now(),app['job_id']))
+            return app['job_id']
+
     def application_record(self, aid):
         if not isinstance(aid,str) or not aid or len(aid)>100:
             raise ValueError('Choose an existing application record')
@@ -518,7 +562,7 @@ class Store:
         return {"saved_views":list_views(self),"settings":self.settings(),"templates":self.templates(),"facts":self.facts(False),"missing_setup":self.missing_setup(),
                 "jobs":rows(f"SELECT j.* FROM jobs j ORDER BY {priority} DESC,j.score DESC,j.first_seen DESC LIMIT 500",parameters),
                 "applications":rows(f"SELECT {'*' if include_packages else APPLICATION_METADATA} FROM applications ORDER BY (state IN ('unknown','awaiting_verification')) DESC,created DESC LIMIT 500"),
-                "questions":rows("SELECT * FROM questions WHERE resolved=0 ORDER BY rowid" + (" LIMIT ?" if question_limit is not None else ''), (question_limit,) if question_limit is not None else ()),
+                "questions":rows("SELECT * FROM questions WHERE resolved=0 AND job_id NOT IN (SELECT job_id FROM job_decisions) ORDER BY rowid" + (" LIMIT ?" if question_limit is not None else ''), (question_limit,) if question_limit is not None else ()),
                 "runs":rows("SELECT * FROM runs ORDER BY started DESC LIMIT 30"),
                 "sources":rows("SELECT * FROM sources ORDER BY (error!='') DESC,checked DESC,id LIMIT 100"),
                 "employer_accounts":rows("SELECT * FROM employer_accounts ORDER BY (state IN ('uncertain','creating','signing_in')) DESC,updated DESC,id LIMIT 100"),

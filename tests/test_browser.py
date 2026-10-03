@@ -258,6 +258,7 @@ def test_acknowledged_upload_can_remove_original_file_input(store,ats):
         def ack(answers,documents,fields):
             # Equivalent to the independently tested successful upload response callback.
             b.uploaded_files.update(d['hash'] for d in documents)
+            b.ashby_attached_files.update(d['hash'] for d in documents)
             return original(answers,documents,fields)
         b._verify=ack
         assert b.apply(job)=='confirmed'
@@ -361,7 +362,8 @@ def test_required_cover_letter_is_generated_uploaded_and_confirmed(store,ats,mon
 
 
 @pytest.mark.parametrize('ats',['otp'],indirect=True)
-def test_gmail_code_continues_the_same_application_without_model_access(store,ats,monkeypatch):
+@pytest.mark.parametrize('screenshot_failure',[False,True])
+def test_gmail_code_continues_the_same_application_without_model_access(store,ats,monkeypatch,screenshot_failure):
     store.update_settings({'gmail_verification':True})
     class Mailbox:
         def __init__(self,s):self.store=s
@@ -369,7 +371,13 @@ def test_gmail_code_continues_the_same_application_without_model_access(store,at
             assert company=='Synthetic ATS' and length==8
             return 'ABC12345'
     monkeypatch.setattr('hireme.gmail.GmailClient',Mailbox)
-    with Browser(store,test_url=ats[0]) as b:assert b.apply(local_job(store,ats))=='confirmed'
+    with Browser(store,test_url=ats[0]) as b:
+        original=b.page.screenshot
+        def screenshot(**kwargs):
+            if screenshot_failure and not str(kwargs['path']).endswith('-before.jpg'):raise TimeoutError('slow screenshot')
+            return original(**kwargs)
+        monkeypatch.setattr(b.page,'screenshot',screenshot)
+        assert b.apply(local_job(store,ats))=='confirmed'
     assert len(ats[1])==1
     app=store.db.execute('SELECT * FROM applications').fetchone()
     assert app['state']=='confirmed'
@@ -402,3 +410,228 @@ def test_model_budget_and_rate_limit_stop_before_employer_write(store,ats,monkey
         with pytest.raises(Blocked,match=reason):browser.apply(local_job(store,ats))
     assert not ats[1]
     assert not store.db.execute('SELECT 1 FROM questions').fetchone()
+
+
+def test_ashby_autosave_is_suppressed_without_blocking_local_form(store,monkeypatch):
+    monkeypatch.setattr('hireme.browser.public_host',lambda host:True)
+    b=Browser(store);b.current_host='jobs.ashbyhq.com'
+    class Request:
+        url='https://jobs.ashbyhq.com/api/non-user-graphql?op=ApiSetFormValue'
+        method='POST'
+        post_data=json.dumps({'operationName':'ApiSetFormValue','query':'mutation ApiSetFormValue { setFormValue { id } }'})
+    class Route:
+        request=Request()
+        action=None
+        def abort(self):self.action='abort'
+        def continue_(self):self.action='continue'
+    r=Route();b._route(r)
+    assert r.action=='abort' and not b.denied_write
+    r.request.post_data=json.dumps({'operationName':'SubmitApplication','query':'mutation SubmitApplication { submitApplication { id } }'})
+    b._route(r)
+    assert r.action=='abort' and b.denied_write
+    assert b.denied_request=={'host':'jobs.ashbyhq.com','path':'/api/non-user-graphql','method':'POST','operation':'SubmitApplication'}
+
+
+def test_ashby_hydration_autosave_does_not_prevent_preparing_form(store,monkeypatch):
+    monkeypatch.setattr('hireme.browser.public_host',lambda host:True)
+    url='https://jobs.ashbyhq.com/acme/synthetic-req/application'
+    job={'id':__import__('hireme.util',fromlist=['digest']).digest(url),'url':url,
+         'host':'jobs.ashbyhq.com','company':'Acme','title':'Software Engineer Intern Summer 2027',
+         'location':'San Francisco, United States','description':'Build Python software.','source':'ash:synthetic'}
+    store.upsert_job(job)
+    html=(Path(__file__).parent/'fixtures/application.html').read_text()
+    html=html.replace('</body>', '''<script>
+      fetch('/api/non-user-graphql?op=ApiSetFormValue', {method:'POST',
+        body:JSON.stringify({operationName:'ApiSetFormValue',
+          query:'mutation ApiSetFormValue { setFormValue { id } }',variables:{value:null}})
+      }).catch(()=>{});
+      </script></body>''')
+    with Browser(store) as b:
+        def serve(route):
+            if route.request.method=='GET':route.fulfill(status=200,content_type='text/html',body=html)
+            else:b._route(route)
+        b.page.route('**/*',serve)
+        original_verify=b._verify
+        def verify_with_synthetic_upload(answers,documents,fields):
+            # This fixture uses native local file selection; S3 routing is tested separately.
+            b.uploaded_files.update(d['hash'] for d in documents)
+            b.ashby_attached_files.update(d['hash'] for d in documents)
+            return original_verify(answers,documents,fields)
+        b._verify=verify_with_synthetic_upload
+        assert b.apply(job,live=False)=='prepared'
+        assert not b.denied_write
+    assert store.db.execute("SELECT count(*) FROM events WHERE kind='draft_autosave_suppressed'").fetchone()[0]>=1
+
+
+def test_greenhouse_checkbox_choices_keep_question_and_choose_only_one(store,ats):
+    job=local_job(store,ats)
+    original=(Path(__file__).parent/'fixtures/application.html').read_text()
+    html=original.replace('</form>', '''<div>
+    <label><input type="checkbox" name="authorization[]" required id="auth-yes" description="Are you currently authorized to work in the United States?" value="1">Yes</label>
+    <label><input type="checkbox" name="authorization[]" required id="auth-no" description="Are you currently authorized to work in the United States?" value="2">No</label>
+    </div></form>''')
+    with Browser(store,test_url=ats[0]) as b:
+        b.page.route(ats[0]+'/**',lambda route:route.fulfill(status=200,content_type='text/html',body=html) if route.request.method=='GET' else route.fallback())
+        assert b.apply(job,live=False)=='prepared'
+        assert b.page.locator('#auth-yes').is_checked()
+        assert not b.page.locator('#auth-no').is_checked()
+        groups=[f for f in b._snapshot() if f['type']=='checkbox-group']
+        assert len(groups)==1 and groups[0]['value']=='Yes'
+
+
+def test_ashby_checkbox_fieldset_retains_question_and_independent_option_names(store,ats):
+    store.put_facts({'onsite':'Yes'})
+    store.update_settings({'contextual_preferences':True})
+    job={**local_job(store,ats),'source':'ash:synthetic'}
+    original=(Path(__file__).parent/'fixtures/application.html').read_text()
+    fields=''
+    for title,options in [('Which office are you applying to? (Select both if appropriate)',['San Francisco HQ - 181 Fremont Street','New York City - 1 World Trade']),('How did you hear about Koah?',['LinkedIn','Indeed','Search engine','Other'])]:
+        fields+='<fieldset class="ashby-application-form-input-checkbox-group"><label class="ashby-application-form-question-title _required_test">'+title+'</label>'
+        for i,option in enumerate(options):
+            ident=str(len(fields))+str(i)
+            fields+=f'<label for="{ident}">{option}</label><input type="checkbox" id="{ident}" name="{option}">'
+        fields+='</fieldset>'
+    html=original.replace('</form>',fields+'</form>')
+    with Browser(store,test_url=ats[0]) as b:
+        b.page.route(ats[0]+'/**',lambda r:r.fulfill(status=200,content_type='text/html',body=html) if r.request.method=='GET' else r.fallback())
+        assert b.apply(job,live=False)=='prepared'
+        groups=[f for f in b._snapshot() if f['type']=='checkbox-group']
+        assert [f['value'] for f in groups]==['San Francisco HQ - 181 Fremont Street','Other']
+        assert all(f['required'] for f in groups)
+
+
+def test_batched_ashby_autosave_is_aborted_but_submission_batch_stays_blocked(store,monkeypatch):
+    monkeypatch.setattr('hireme.browser.public_host',lambda host:True)
+    b=Browser(store);b.current_host='jobs.ashbyhq.com'
+    class Request:
+        url='https://jobs.ashbyhq.com/api/non-user-graphql';method='POST'
+        post_data=json.dumps([{'operationName':'ApiSetFormValue','query':'mutation ApiSetFormValue { setFormValue { id } }'}, {'operationName':'Read','query':'query Read { id }'}])
+    class Route:
+        request=Request();action=None
+        def abort(self):self.action='abort'
+        def continue_(self):self.action='continue'
+    route=Route();b._route(route)
+    assert route.action=='abort' and not b.denied_write
+    route.request.post_data=json.dumps([{'operationName':'Submit','query':'mutation Submit { submit { id } }'}])
+    b._route(route)
+    assert b.denied_write and b.denied_request['operations']==['Submit']
+
+
+def test_ashby_upload_handle_only_for_approved_document_bytes(store,monkeypatch):
+    monkeypatch.setattr('hireme.browser.public_host',lambda host:True)
+    b=Browser(store);b.current_host='jobs.ashbyhq.com';b.upload_payloads={'approved':b'pdf-bytes'}
+    class Request:
+        url='https://jobs.ashbyhq.com/api/non-user-graphql';method='POST'
+        post_data=json.dumps({'operationName':'ApiCreateFileUploadHandle','query':'mutation ApiCreateFileUploadHandle { createFileUploadHandle { handle } }','variables':{'filename':'approved.pdf','contentType':'application/pdf','contentLength':9}})
+    class Route:
+        request=Request();action=None
+        def abort(self):self.action='abort'
+        def continue_(self):self.action='continue'
+    route=Route();b._route(route);assert route.action=='continue'
+    data=json.loads(route.request.post_data);data['variables']['filename']='unknown.pdf';route.request.post_data=json.dumps(data)
+    b._route(route);assert route.action=='abort' and b.denied_write
+
+
+def test_ashby_s3_upload_requires_approved_bytes_and_exact_destination(store,monkeypatch):
+    from hireme.browser import ASHBY_UPLOAD_HOST
+    monkeypatch.setattr('hireme.browser.public_host',lambda host:True)
+    b=Browser(store);b.current_host='jobs.ashbyhq.com';b.upload_payloads={'approved':b'approved-pdf-content'}
+    class Request:
+        url='https://'+ASHBY_UPLOAD_HOST+'/';method='POST';post_data_buffer=b'form approved-pdf-content ending'
+    class Route:
+        request=Request();action=None
+        def abort(self):self.action='abort'
+        def continue_(self):self.action='continue'
+    route=Route();b._route(route);assert route.action=='continue'
+    # Chromium omits multipart file bytes from the intercepted request body.
+    route.request.post_data_buffer=b'filename=approved.pdf; signed form fields'
+    b._route(route);assert route.action=='continue'
+    route.request.post_data_buffer=b'unapproved';b._route(route);assert route.action=='abort'
+    route.request.url='https://'+ASHBY_UPLOAD_HOST+'.attacker.invalid/'
+    route.request.post_data_buffer=b'approved-pdf-content';b._route(route);assert route.action=='abort'
+
+
+def test_ashby_attachment_requires_handle_from_approved_successful_upload(store,monkeypatch):
+    monkeypatch.setattr('hireme.browser.public_host',lambda host:True)
+    b=Browser(store);b.current_host='jobs.ashbyhq.com'
+    b.ashby_file_handles={'known':'approved'}
+    class Request:
+        url='https://jobs.ashbyhq.com/api/non-user-graphql';method='POST'
+        post_data=json.dumps({'operationName':'ApiSetFormValueToFile','query':'mutation ApiSetFormValueToFile { setFormValueToFile { id } }','variables':{'fileHandle':'known'}})
+    class Route:
+        request=Request();action=None
+        def abort(self):self.action='abort'
+        def continue_(self):self.action='continue'
+    r=Route();b._route(r);assert r.action=='abort'
+    b.uploaded_files.add('approved');b.denied_write=False;b._route(r);assert r.action=='continue'
+    class Response:
+        request=Request();status=200
+        def json(self):return {'data':{'setFormValueToFile':{'id':'form'}}}
+    b._upload_response(Response());assert 'approved' in b.ashby_attached_files
+
+
+def test_ashby_yesno_buttons_preserve_required_question_and_confirmed_answer(store,ats):
+    original=(Path(__file__).parent/'fixtures/application.html').read_text()
+    html=original.replace('</form>', '''<div class="ashby-application-form-field-entry">
+    <label class="ashby-application-form-question-title _required_test">Are you legally authorized to work in the United States?</label>
+    <div class="ashby-application-form-input-yesno">
+    <input type="checkbox" style="display:none" tabindex="-1">
+    <button type="button" class="ashby-application-form-input-yesno-option" aria-pressed="false">Yes</button>
+    <button type="button" class="ashby-application-form-input-yesno-option" aria-pressed="false">No</button>
+    </div></div><script>document.querySelectorAll('.ashby-application-form-input-yesno-option').forEach(e=>e.onclick=()=>{e.parentElement.querySelectorAll('button').forEach(x=>x.setAttribute('aria-pressed',String(x===e)))})</script></form>''')
+    with Browser(store,test_url=ats[0]) as b:
+        b.page.route(ats[0]+'/**',lambda r:r.fulfill(status=200,content_type='text/html',body=html) if r.request.method=='GET' else r.fallback())
+        assert b.apply(local_job(store,ats),live=False)=='prepared'
+        f=next(f for f in b._snapshot() if f['type']=='yesno')
+        assert f['required'] and f['value']=='Yes' and f['options']==['Yes','No']
+
+
+def test_submission_waits_for_delayed_ats_confirmation(store,ats):
+    with Browser(store,test_url=ats[0]) as b:
+        b.page.goto(ats[0]);b.current_host='127.0.0.1';b.attempted=True
+        b.page.evaluate("setTimeout(()=>{document.body.innerHTML='Thank you for applying. Your application has been received.'},2500)")
+        text=b._wait_submission_outcome(local_job(store,ats))
+        assert 'received' in text
+
+
+def test_explicit_ats_spam_rejection_is_not_uncertain_or_retried(store,ats):
+    with Browser(store,test_url=ats[0]) as b:
+        job=local_job(store,ats)
+        original=b._wait_submission_outcome
+        def rejection(job,accept_verification=True):
+            b.page.set_content("We couldn't submit your application. Your application submission was flagged as possible spam.")
+            return original(job,accept_verification)
+        b._wait_submission_outcome=rejection
+        assert b.apply(job)=='not_submitted'
+        with pytest.raises(Blocked):b.apply(job)
+    app=store.db.execute('SELECT state,confirmation FROM applications').fetchone()
+    assert app['state']=='not_submitted' and 'possible spam' in app['confirmation']
+
+
+def test_greenhouse_filename_alone_does_not_prove_upload(store,ats):
+    with Browser(store,test_url=ats[0]) as b:
+        b.current_host='job-boards.greenhouse.io'
+        b.page.set_content('<label for="resume">Resume/CV*</label><input id="resume" type="file"><p>approved.pdf</p>')
+        fields=b._snapshot();documents=[{'field':fields[0],'hash':'approved','filename':'approved.pdf'}]
+        with pytest.raises(Blocked,match='Greenhouse has not acknowledged'):b._verify([],documents,fields)
+        b.uploaded_files.add('approved')
+        b._verify([],documents,fields)
+
+
+def test_ashby_radio_question_inherits_required_heading(store,ats):
+    with Browser(store,test_url=ats[0]) as b:
+        b.page.set_content('<fieldset class="_fieldEntry_x ashby-application-form-input-radio-group"><label class="ashby-application-form-question-title _required_x">Can you work in our office?</label><label><input type="radio" name="office" value="yes">Yes</label><label><input type="radio" name="office" value="no">No</label></fieldset>')
+        f=b._snapshot()[0]
+        assert f['required'] and f['type']=='radio' and f['label']=='Can you work in our office?'
+
+
+def test_outcome_screenshot_failure_does_not_lose_confirmation(store,ats,monkeypatch):
+    with Browser(store,test_url=ats[0]) as b:
+        screenshot=b.page.screenshot
+        def fail_after(**kwargs):
+            if str(kwargs['path']).endswith('-after.jpg'):raise TimeoutError('slow screenshot')
+            return screenshot(**kwargs)
+        monkeypatch.setattr(b.page,'screenshot',fail_after)
+        assert b.apply(local_job(store,ats))=='confirmed'
+    app=store.db.execute('SELECT state,screenshot FROM applications').fetchone()
+    assert app['state']=='confirmed' and app['screenshot']==''

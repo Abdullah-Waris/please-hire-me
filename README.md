@@ -23,12 +23,12 @@ This is a personal automation tool, not a hosted multi-tenant service. Each pers
 
 ## Get started
 
-The current workspace improvements are on the **codex/application-workspace** branch of this fork.
+The current workspace improvements are on the **codex/application-workspace-integration** branch of this repository.
 
 Requires **Python 3.11+**, Git, and macOS or Linux. On Windows use a supported Linux environment such as WSL2; the worker uses POSIX file locks. Model inference runs remotely through your selected provider, not on a local GPU.
 
 ```bash
-git clone --branch codex/application-workspace https://github.com/Abdullah-Waris/please-hire-me.git
+git clone --branch codex/application-workspace-integration https://github.com/hoverdart/please-hire-me.git
 cd please-hire-me
 ./setup.sh
 ```
@@ -309,3 +309,5 @@ Tests use synthetic local ATS/mail fixtures. They cover provenance, revisions, s
 MIT. Original source attribution is preserved in [LICENSE](LICENSE). Never commit personal files or credentials.
 
 See the [documentation map](docs/README.md) for the source layout, current references, and archived material.
+
+On each eligible job row, **Applied manually** records your own application and **Don’t apply** excludes only that posting. Both survive discovery and stop automatic retries; **Undo** returns the posting to the queue. Manual applications count toward company limits and cooldowns but remain separate from worker-confirmed submissions. Pending questions are hidden while a posting is excluded. Jobs with confirmed or uncertain submission records use their existing outcome/reconciliation flow.

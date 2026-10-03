@@ -56,7 +56,7 @@ REASON_GUIDANCE = {
     'company_uncertain': ('An earlier company submission is uncertain', 'Verify the earlier outcome before submitting another application to this company.'),
     'company_verification_pending': ('An earlier company application needs verification', 'Complete the earlier email verification before another application to this company.'),
 }
-STATUS_LABELS = {'confirmed': 'Submitted', 'discovered': 'Ready to evaluate', 'blocked': 'Needs action',
+STATUS_LABELS = {'manually_applied': 'Applied manually', 'skipped': 'Don’t apply', 'confirmed': 'Submitted', 'discovered': 'Ready to evaluate', 'blocked': 'Needs action',
                  'unknown': 'Uncertain', 'awaiting_verification': 'Check email', 'prepared': 'Prepared',
                  'submitting': 'Submitting', 'rejected': 'Not a match'}
 

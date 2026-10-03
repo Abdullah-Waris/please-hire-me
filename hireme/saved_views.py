@@ -4,7 +4,7 @@ import uuid
 
 from .util import now
 
-STATUSES = {'all','confirmed','blocked','unknown','awaiting_verification','discovered','not_match','waiting','prepared'}
+STATUSES = {'manually_applied','skipped','all','confirmed','blocked','unknown','awaiting_verification','discovered','not_match','waiting','prepared'}
 SORTS = {'recent','fit','company'}
 
 

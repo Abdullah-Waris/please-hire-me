@@ -27,12 +27,12 @@ def summary(store, at=None):
     model_requests = store.db.execute('SELECT COUNT(*) FROM model_requests WHERE timestamp>=? AND timestamp<?', bounds).fetchone()[0]
     condition, parameters = attention_sql('j')
     attention = store.db.execute(f"""SELECT COUNT(*) FROM (
-        SELECT job_id FROM questions WHERE resolved=0
+        SELECT job_id FROM questions WHERE resolved=0 AND job_id NOT IN (SELECT job_id FROM job_decisions)
         UNION SELECT j.id FROM jobs j WHERE {condition}
         UNION SELECT job_id FROM applications WHERE state IN ('unknown','awaiting_verification')
     )""", parameters).fetchone()[0]
     accounts = store.db.execute("SELECT COUNT(*) FROM employer_accounts WHERE state='uncertain'").fetchone()[0]
-    questions = store.db.execute('SELECT COUNT(*) FROM questions WHERE resolved=0').fetchone()[0]
+    questions = store.db.execute('SELECT COUNT(*) FROM questions WHERE resolved=0 AND job_id NOT IN (SELECT job_id FROM job_decisions)').fetchone()[0]
     held = store.db.execute(f"SELECT COUNT(*) FROM jobs j WHERE j.status='blocked' AND {condition}", parameters).fetchone()[0]
     return {'job_count': sum(counts.values()), 'status_counts': counts, 'submitted_today': submitted,
             'attention_count': attention + accounts, 'question_count': questions, 'held_count': held,
@@ -80,7 +80,7 @@ def search_jobs(store, search='', status='all', sort='recent', offset=0, limit=5
     if sort not in ordering:
         raise ValueError('Choose recent, fit, or company sorting')
     allowed = {'all', 'confirmed', 'blocked', 'unknown', 'awaiting_verification', 'discovered',
-               'not_match', 'waiting', 'prepared', 'submitting', 'rejected', 'not_submitted'}
+               'manually_applied', 'skipped', 'not_match', 'waiting', 'prepared', 'submitting', 'rejected', 'not_submitted'}
     if status not in allowed:
         raise ValueError('Unknown opportunity status')
     clauses = []; parameters = []
