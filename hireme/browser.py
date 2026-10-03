@@ -13,7 +13,8 @@ from .answers import resolve,REFUSE,field_key
 from .discovery import ATS_HOSTS,PORTAL_HOSTS
 from .util import Blocked,digest,private_dir,public_host,safe_document
 
-UPLOAD_HOSTS={'grnhse-prod-jben-us-west-2.s3.us-west-2.amazonaws.com',
+ASHBY_UPLOAD_HOST='ashbyhq-infra-prd-main-app-uploaded-files-us-east-1.s3.us-east-1.amazonaws.com'
+UPLOAD_HOSTS={ASHBY_UPLOAD_HOST,'grnhse-prod-jben-us-west-2.s3.us-west-2.amazonaws.com',
               'grnhse-prod-jben-us-east-1.s3.us-east-1.amazonaws.com',
               'grnhse-prod-jben-eu-west-1.s3.eu-west-1.amazonaws.com'}
 CONTROLS='input:not([type=hidden]):not([type=submit]):not([type=button]),textarea,select,[role=combobox]:not(input):not(select)'
@@ -131,6 +132,8 @@ class Browser:
         if host in UPLOAD_HOSTS:
             payload=getattr(route.request,'post_data_buffer',None) or b''
             approved=self.current_host in {'boards.greenhouse.io','job-boards.greenhouse.io','boards.eu.greenhouse.io','job-boards.eu.greenhouse.io'} and route.request.method=='POST' and any(data in payload or h.encode() in payload for h,data in self.upload_payloads.items())
+            approved=approved or (host==ASHBY_UPLOAD_HOST and self.current_host=='jobs.ashbyhq.com'
+                                  and route.request.method=='POST' and any(data in payload for data in self.upload_payloads.values()))
             return route.continue_() if approved else route.abort()
         # No arbitrary website can receive personal values through an injected pixel or redirect.
         asset_hosts={"www.google.com","www.gstatic.com","fonts.googleapis.com","fonts.gstatic.com",
@@ -401,6 +404,8 @@ class Browser:
                 actual=re.sub(r'[^0-9]','',actual);value=re.sub(r'[^0-9]','',value)
             if actual!=value:raise Blocked('field_verification_failed',f['label'])
         for d in documents:
+            if self.current_host=='jobs.ashbyhq.com' and d['hash'] not in self.uploaded_files:
+                raise Blocked('upload_verification_failed','The approved PDF did not receive a successful upload response')
             if d['hash'] in self.uploaded_files and d['filename'] in body:continue
             el=self._control(d['field'])
             sizes=el.evaluate('(e)=>Array.from(e.files||[]).map(f=>f.size)')

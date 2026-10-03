@@ -443,6 +443,12 @@ def test_ashby_hydration_autosave_does_not_prevent_preparing_form(store,monkeypa
             if route.request.method=='GET':route.fulfill(status=200,content_type='text/html',body=html)
             else:b._route(route)
         b.page.route('**/*',serve)
+        original_verify=b._verify
+        def verify_with_synthetic_upload(answers,documents,fields):
+            # This fixture uses native local file selection; S3 routing is tested separately.
+            b.uploaded_files.update(d['hash'] for d in documents)
+            return original_verify(answers,documents,fields)
+        b._verify=verify_with_synthetic_upload
         assert b.apply(job,live=False)=='prepared'
         assert not b.denied_write
     assert store.db.execute("SELECT count(*) FROM events WHERE kind='draft_autosave_suppressed'").fetchone()[0]>=1
@@ -515,3 +521,19 @@ def test_ashby_upload_handle_only_for_approved_document_bytes(store,monkeypatch)
     route=Route();b._route(route);assert route.action=='continue'
     data=json.loads(route.request.post_data);data['variables']['filename']='unknown.pdf';route.request.post_data=json.dumps(data)
     b._route(route);assert route.action=='abort' and b.denied_write
+
+
+def test_ashby_s3_upload_requires_approved_bytes_and_exact_destination(store,monkeypatch):
+    from hireme.browser import ASHBY_UPLOAD_HOST
+    monkeypatch.setattr('hireme.browser.public_host',lambda host:True)
+    b=Browser(store);b.current_host='jobs.ashbyhq.com';b.upload_payloads={'approved':b'approved-pdf-content'}
+    class Request:
+        url='https://'+ASHBY_UPLOAD_HOST+'/';method='POST';post_data_buffer=b'form approved-pdf-content ending'
+    class Route:
+        request=Request();action=None
+        def abort(self):self.action='abort'
+        def continue_(self):self.action='continue'
+    route=Route();b._route(route);assert route.action=='continue'
+    route.request.post_data_buffer=b'unapproved';b._route(route);assert route.action=='abort'
+    route.request.url='https://'+ASHBY_UPLOAD_HOST+'.attacker.invalid/'
+    route.request.post_data_buffer=b'approved-pdf-content';b._route(route);assert route.action=='abort'
