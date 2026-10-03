@@ -45,7 +45,7 @@ def field_key(label):
     if 'highest' in label and re.search(r'education|degree',label):return 'highest_completed_degree'
     if re.search(r'(?:will|do).*(?:require|need).*sponsor|(?:require|need).*employment visa',label):return 'needs_sponsorship'
     if re.search(r'(?:authorized|eligible|authorization).*(?:united states|u\.s\.|\bus\b)',label):return 'work_authorized_us'
-    if re.search(r'(?:open|willing|comfortable).*(?:in.person|on.site|in office)|^i understand that this position requires me to work on.site',label):return 'onsite'
+    if re.search(r'(?:open|willing|comfortable).*(?:in.person|on.site|in office)|^i understand that this position requires me to work on.site|(?:can|able to).*work (?:from|at|in).*(?:office|headquarters|\bhq\b)',label):return 'onsite'
     return None
 
 
@@ -196,7 +196,7 @@ def _compatible_binding(key, label):
         'us_person':r'u\.?s\.? person|citizen|export|itar',
         'citizenship':r'citizen|nationality',
         'professional_years':r'years?.*(?:experience|professional|work)|experience.*years?',
-        'onsite':r'on.?site|in.person|office|hybrid',
+        'onsite':r'on.?site|in.person|office|hybrid|headquarters|\bhq\b',
         'background_check':r'background.*check|screening',
         'recording':r'record|video',
         'sms':r'sms|text message',

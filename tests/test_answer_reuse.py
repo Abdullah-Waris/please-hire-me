@@ -293,6 +293,12 @@ def test_relocation_need_uses_current_location_not_willingness(store,job):
     with pytest.raises(Blocked):resolve(store,job['host'],question,context=job)
 
 
+def test_hq_work_question_uses_confirmed_onsite_preference(store,job):
+    store.put_facts({'onsite':'Yes'})
+    question=field('Can you work from our San Francisco HQ (4 days a week)?','radio',['Yes','No'])
+    assert resolve(store,job['host'],question,context=job)['value']=='Yes'
+
+
 def test_tailored_answers_can_use_resume_without_separate_templates_and_revalidate_hash(store,job):
     from reportlab.pdfgen import canvas
     import io,hashlib
