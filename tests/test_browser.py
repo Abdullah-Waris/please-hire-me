@@ -258,6 +258,7 @@ def test_acknowledged_upload_can_remove_original_file_input(store,ats):
         def ack(answers,documents,fields):
             # Equivalent to the independently tested successful upload response callback.
             b.uploaded_files.update(d['hash'] for d in documents)
+            b.ashby_attached_files.update(d['hash'] for d in documents)
             return original(answers,documents,fields)
         b._verify=ack
         assert b.apply(job)=='confirmed'
@@ -447,6 +448,7 @@ def test_ashby_hydration_autosave_does_not_prevent_preparing_form(store,monkeypa
         def verify_with_synthetic_upload(answers,documents,fields):
             # This fixture uses native local file selection; S3 routing is tested separately.
             b.uploaded_files.update(d['hash'] for d in documents)
+            b.ashby_attached_files.update(d['hash'] for d in documents)
             return original_verify(answers,documents,fields)
         b._verify=verify_with_synthetic_upload
         assert b.apply(job,live=False)=='prepared'
@@ -540,3 +542,22 @@ def test_ashby_s3_upload_requires_approved_bytes_and_exact_destination(store,mon
     route.request.post_data_buffer=b'unapproved';b._route(route);assert route.action=='abort'
     route.request.url='https://'+ASHBY_UPLOAD_HOST+'.attacker.invalid/'
     route.request.post_data_buffer=b'approved-pdf-content';b._route(route);assert route.action=='abort'
+
+
+def test_ashby_attachment_requires_handle_from_approved_successful_upload(store,monkeypatch):
+    monkeypatch.setattr('hireme.browser.public_host',lambda host:True)
+    b=Browser(store);b.current_host='jobs.ashbyhq.com'
+    b.ashby_file_handles={'known':'approved'}
+    class Request:
+        url='https://jobs.ashbyhq.com/api/non-user-graphql';method='POST'
+        post_data=json.dumps({'operationName':'ApiSetFormValueToFile','query':'mutation ApiSetFormValueToFile { setFormValueToFile { id } }','variables':{'fileHandle':'known'}})
+    class Route:
+        request=Request();action=None
+        def abort(self):self.action='abort'
+        def continue_(self):self.action='continue'
+    r=Route();b._route(r);assert r.action=='abort'
+    b.uploaded_files.add('approved');b.denied_write=False;b._route(r);assert r.action=='continue'
+    class Response:
+        request=Request();status=200
+        def json(self):return {'data':{'setFormValueToFile':{'id':'form'}}}
+    b._upload_response(Response());assert 'approved' in b.ashby_attached_files

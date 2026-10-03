@@ -74,7 +74,7 @@ class Browser:
     def __init__(self,store,test_url=None):
         self.store=store; self.test_url=test_url; self.context=None; self.playwright=None
         self.page=None; self.aid=None; self.attempted=False; self.current_host=""; self.host_cache={}; self.denied_write=False; self.denied_request=None; self.upload_payloads={}; self.uploaded_files=set()
-        self.auth_write=None
+        self.auth_write=None;self.ashby_file_handles={};self.ashby_attached_files=set()
 
     def __enter__(self):
         from playwright.sync_api import sync_playwright
@@ -175,6 +175,13 @@ class Browser:
                         uploading_document=next((blob for h,blob in self.upload_payloads.items() if filename==h+'.pdf'),None)
                         reading=bool(uploading_document and variables.get('contentType')=='application/pdf'
                                      and variables.get('contentLength')==len(uploading_document))
+                if (host==self.current_host=='jobs.ashbyhq.com' and p.path=='/api/non-user-graphql'
+                        and isinstance(data,dict) and data.get('operationName')=='ApiSetFormValueToFile'
+                        and isinstance(data.get('query'),str)
+                        and re.match(r'^\s*mutation\s+ApiSetFormValueToFile\b',data['query'])):
+                    variables=data.get('variables',{})
+                    handle=variables.get('fileHandle') if isinstance(variables,dict) else None
+                    reading=isinstance(handle,str) and self.ashby_file_handles.get(handle) in self.uploaded_files
                 # Upload-only requests are permitted on known ATS upload paths, never arbitrary mutations.
                 reading=reading or p.path=='/uncacheable_attributes/presigned_fields'
                 passive_check=p.path.startswith("/cdn-cgi/challenge-platform/")
@@ -203,6 +210,21 @@ class Browser:
 
     def _upload_response(self,response):
         request=response.request
+        if (request.method=='POST' and self.current_host=='jobs.ashbyhq.com'
+                and urlsplit(request.url).hostname=='jobs.ashbyhq.com'
+                and urlsplit(request.url).path=='/api/non-user-graphql' and 200<=response.status<300):
+            try:
+                query=json.loads(request.post_data or '{}');result=response.json()
+                variables=query.get('variables',{})
+                if query.get('operationName')=='ApiCreateFileUploadHandle':
+                    h=next((h for h in self.upload_payloads if variables.get('filename')==h+'.pdf'),None)
+                    handle=result.get('data',{}).get('fileUploadHandle',{}).get('handle')
+                    if h and isinstance(handle,str):self.ashby_file_handles[handle]=h
+                elif query.get('operationName')=='ApiSetFormValueToFile':
+                    h=self.ashby_file_handles.get(variables.get('fileHandle'))
+                    if h in self.uploaded_files and not result.get('errors') and result.get('data',{}).get('setFormValueToFile'):
+                        self.ashby_attached_files.add(h)
+            except (ValueError,TypeError,AttributeError):pass
         if request.method!='POST' or urlsplit(request.url).hostname not in UPLOAD_HOSTS or not 200<=response.status<300:return
         payload=request.post_data_buffer or b''
         for h,data in self.upload_payloads.items():
@@ -404,7 +426,7 @@ class Browser:
                 actual=re.sub(r'[^0-9]','',actual);value=re.sub(r'[^0-9]','',value)
             if actual!=value:raise Blocked('field_verification_failed',f['label'])
         for d in documents:
-            if self.current_host=='jobs.ashbyhq.com' and d['hash'] not in self.uploaded_files:
+            if self.current_host=='jobs.ashbyhq.com' and (d['hash'] not in self.uploaded_files or d['hash'] not in self.ashby_attached_files):
                 raise Blocked('upload_verification_failed','The approved PDF did not receive a successful upload response')
             if d['hash'] in self.uploaded_files and d['filename'] in body:continue
             el=self._control(d['field'])
@@ -421,7 +443,7 @@ class Browser:
         }))'''):raise Blocked('invalid_fields')
 
     def apply(self,job,live=True):
-        self.aid=None; self.attempted=False; self.denied_write=False; self.denied_request=None; self.upload_payloads={}; self.uploaded_files=set();self.auth_write=None
+        self.aid=None; self.attempted=False; self.denied_write=False; self.denied_request=None; self.upload_payloads={}; self.uploaded_files=set();self.auth_write=None;self.ashby_file_handles={};self.ashby_attached_files=set()
         self.store.check_job_decision(job['id'])
         self.current_host=job['host']
         if self.test_url:self.current_host=urlsplit(self.test_url).hostname
