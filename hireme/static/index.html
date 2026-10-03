@@ -10,6 +10,7 @@
     />
     <title>Application desk · Your next chapter</title>
     <link rel="stylesheet" href="/style.css" />
+    <script src="/notes.js" defer></script>
     <script src="/app.js" defer></script>
   </head>
   <body>
@@ -1652,6 +1653,15 @@ claude auth login</pre
           saved posting below to compare current saved facts and preferences.
           Fit does not predict employer interest.
         </p>
+        <details id="opportunity-notes" class="section">
+          <summary>Your private notes</summary>
+          <p id="opportunity-note-help" class="help">
+            Keep reminders about this role. Notes stay in your private workspace
+            and history backups; they are not used in applications or sent to a
+            model. Up to 4,000 characters. Save an empty note to clear it.
+          </p>
+          <div id="opportunity-note-editor"></div>
+        </details>
         <h3>About the opportunity</h3>
         <p id="job-dialog-description" class="posting-description"></p>
         <div class="section">

@@ -101,7 +101,7 @@ window.addEventListener("beforeunload", (event) => {
   const unfinished = [$("#facts-form"), $("#settings-form")].some(
     (form) => dirtyForms.has(form) || form.dataset.saving === "true",
   );
-  if (!unfinished) return;
+  if (!unfinished && !opportunityNotes.hasDrafts()) return;
   event.preventDefault();
   event.returnValue = "";
 });
@@ -4567,6 +4567,7 @@ function openOpportunity(job) {
   const payload = jobPayload(job),
     dialog = $("#job-dialog");
   dialog.dataset.jobId = job.id;
+  opportunityNotes.prepare(job.id);
   postingCheckRequest++;
   $("#check-saved-posting").disabled = false;
   $("#check-saved-posting").textContent = "Check saved posting";

@@ -17,6 +17,8 @@ from .config import DEFAULTS, FACTS, REQUIRED, validate_fact, validate_settings
 from .util import Blocked, atomic_json, company_normalizer, digest, now, private_dir
 
 SCHEMA = """
+CREATE TABLE IF NOT EXISTS job_notes (job_id TEXT PRIMARY KEY,body TEXT NOT NULL,
+ revision INTEGER NOT NULL,updated TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS saved_views (id TEXT PRIMARY KEY,name TEXT NOT NULL,name_key TEXT UNIQUE NOT NULL,
  search TEXT NOT NULL,status TEXT NOT NULL,sort TEXT NOT NULL,created TEXT NOT NULL,updated TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS employer_accounts (id TEXT PRIMARY KEY, origin TEXT NOT NULL,

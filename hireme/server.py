@@ -121,9 +121,9 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
         def do_GET(self):
             path=urlsplit(self.path).path
             if not self._valid_host():return self.send(403,{'error':'Invalid host'})
-            if path in ('/','/app.js','/style.css'):
-                name={'/':'index.html','/app.js':'app.js','/style.css':'style.css'}[path]
-                return self.send(200,(assets/name).read_bytes(),{'/':'text/html; charset=utf-8','/app.js':'text/javascript','/style.css':'text/css'}[path])
+            if path in ('/','/app.js','/notes.js','/style.css'):
+                name={'/':'index.html','/app.js':'app.js','/notes.js':'notes.js','/style.css':'style.css'}[path]
+                return self.send(200,(assets/name).read_bytes(),{'/':'text/html; charset=utf-8','/app.js':'text/javascript','/notes.js':'text/javascript','/style.css':'text/css'}[path])
             if not self._auth():return self.send(403,{'error':'Open the dashboard URL printed by hireme dashboard'})
             store=Store(root)
             try:
@@ -162,6 +162,10 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                 if path=='/api/diagnostics':
                     from .doctor import dashboard_diagnostics
                     return self.send(200,dashboard_diagnostics(store,demo=demo))
+                if path.startswith('/api/job-note/'):
+                    from .job_notes import get_note
+                    try:return self.send(200,get_note(store,unquote(path[len('/api/job-note/'):])))
+                    except ValueError as error:return self.send(400,{'error':str(error)})
                 if path=='/api/jobs':
                     from .ledger import search_jobs
                     query=parse_qs(urlsplit(self.path).query)
@@ -284,6 +288,10 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                         result=preview_postings(store,raw) if path.endswith('-preview') else import_postings(store,raw,self.headers.get('X-Import-Hash',''))
                         return self.send(200,result)
                     data=json.loads(raw)
+                    if path=='/api/job-note':
+                        from .job_notes import save_note,NoteConflict
+                        try:return self.send(200,save_note(store,data))
+                        except NoteConflict as error:return self.send(409,{'error':str(error)})
                     if path=='/api/saved-view':
                         from .saved_views import change_view
                         return self.send(200,change_view(store,data))

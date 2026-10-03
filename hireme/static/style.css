@@ -1915,3 +1915,16 @@ pre {
   font-size: 12px;
   padding: 8px 10px;
 }
+
+.opportunity-note-form label {
+  display: grid;
+  gap: 8px;
+  font-weight: 600;
+}
+.opportunity-note-form textarea {
+  width: 100%;
+  resize: vertical;
+}
+.opportunity-note-form .actions {
+  flex-wrap: wrap;
+}

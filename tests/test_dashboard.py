@@ -2431,3 +2431,98 @@ def test_discard_fact_edits_restores_confirmed_values_and_unconfirmed_proposals_
             assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
             browser.close()
     finally:process.terminate();process.join(5)
+
+
+def test_private_opportunity_notes_preserve_drafts_retry_conflicts_and_application_history(store,job,package):
+    from hireme.job_notes import get_note,save_note
+    from playwright.sync_api import sync_playwright,expect
+    aid=store.prepare(job,package);store.begin_submit(aid);store.finish(aid,'unknown')
+    before=store.snapshot()
+    sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port));process.start()
+    base=f'http://127.0.0.1:{port}';headers={'X-Hireme-Token':'fixture-capability'}
+    try:
+        for _ in range(50):
+            try:urllib.request.urlopen(base).close();break
+            except OSError:time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch();page=browser.new_page(viewport={'width':320,'height':844})
+            errors=[];reads=[];page.on('pageerror',lambda error:errors.append(str(error)))
+            page.on('request',lambda request:reads.append(request.url) if '/api/job-note/' in request.url else None)
+            assert page.request.get(base+'/api/job-note/'+job['id']).status==403
+            assert page.request.post(base+'/api/job-note',data={'job_id':job['id'],'body':'Unauthorized','revision':0}).status==403
+            assert page.request.get(base+'/api/job-note/missing',headers=headers).status==400
+            page.goto(base+'/#token=fixture-capability')
+            details=page.get_by_role('button',name=f"View details for {job['company']} · {job['title']}",exact=True)
+            details.click();assert not reads
+            page.locator('#opportunity-notes summary').click()
+            field=page.locator('#opportunity-note-body');expect(field).to_be_enabled()
+            field.fill('Private reminder <script>literal only</script>')
+            page.locator('#close-job-dialog').click();details.click()
+            expect(page.locator('#opportunity-notes summary')).to_contain_text('Unsaved draft')
+            page.locator('#opportunity-notes summary').click()
+            expect(field).to_have_value('Private reminder <script>literal only</script>')
+            page.route('**/api/job-note',lambda route:route.fulfill(status=503,json={'error':'Synthetic interrupted note save'}),times=1)
+            page.get_by_role('button',name='Save note',exact=True).click()
+            expect(page.locator('#opportunity-note-editor [role=alert]')).to_contain_text('Synthetic interrupted')
+            expect(field).to_have_value('Private reminder <script>literal only</script>');expect(field).to_be_enabled()
+            page.get_by_role('button',name='Save note',exact=True).click()
+            expect(page.locator('#opportunity-note-status')).to_contain_text('Private note saved')
+            assert get_note(store,job['id'])['revision']==1
+            field.fill('My newer private draft')
+            save_note(store,{'job_id':job['id'],'body':'Changed in another synthetic tab','revision':1})
+            page.get_by_role('button',name='Save note',exact=True).click()
+            expect(page.locator('#opportunity-note-editor [role=alert]')).to_contain_text('changed in another tab')
+            expect(field).to_have_value('My newer private draft')
+            page.get_by_role('button',name='Discard edits and reload',exact=True).click()
+            expect(field).to_have_value('Changed in another synthetic tab');expect(field).to_be_enabled()
+            field.fill('');page.get_by_role('button',name='Save note',exact=True).click()
+            expect(page.locator('#opportunity-note-status')).to_contain_text('Private note cleared')
+            assert get_note(store,job['id'])['body']=='' and get_note(store,job['id'])['revision']==3
+            assert store.snapshot()==before and not errors
+            assert not store.db.execute('SELECT * FROM model_requests').fetchone()
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            browser.close()
+    finally:process.terminate();process.join(5)
+
+
+def test_pending_note_save_and_closed_dialog_keep_other_opportunity_drafts_separate(store,job):
+    from hireme.job_notes import get_note
+    from playwright.sync_api import sync_playwright,expect
+    other={**job,'id':'other-synthetic-note-job','url':job['url']+'-other','title':'Another synthetic role'}
+    store.upsert_job(other)
+    sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
+    process=multiprocessing.Process(target=launch,args=(str(store.root),str(Path.cwd()),port));process.start()
+    base=f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try:urllib.request.urlopen(base).close();break
+            except OSError:time.sleep(.1)
+        with sync_playwright() as p:
+            browser=p.chromium.launch();page=browser.new_page(viewport={'width':390,'height':844})
+            pending=[];dialogs=[];errors=[]
+            page.on('pageerror',lambda error:errors.append(str(error)))
+            page.on('dialog',lambda dialog:(dialogs.append(dialog.type),dialog.dismiss()))
+            page.goto(base+'/#token=fixture-capability')
+            page.get_by_role('button',name=f"View details for {job['company']} · {job['title']}",exact=True).click()
+            page.locator('#opportunity-notes summary').click()
+            field=page.locator('#opportunity-note-body');expect(field).to_be_enabled();field.fill('First opportunity saved note')
+            page.route('**/api/job-note',lambda route:pending.append(route),times=1)
+            with page.expect_request('**/api/job-note'):page.get_by_role('button',name='Save note',exact=True).click()
+            expect(field).to_be_disabled()
+            page.locator('#close-job-dialog').click()
+            page.get_by_role('button',name=f"View details for {other['company']} · {other['title']}",exact=True).click()
+            page.locator('#opportunity-notes summary').click();expect(field).to_be_enabled();expect(field).to_have_value('')
+            field.fill('Second opportunity unsaved draft')
+            with page.expect_response('**/api/job-note'):pending.pop().continue_()
+            expect(field).to_have_value('Second opportunity unsaved draft');expect(field).to_be_focused()
+            assert get_note(store,job['id'])['body']=='First opportunity saved note'
+            assert get_note(store,other['id'])['body']==''
+            page.locator('#close-job-dialog').click();page.evaluate('location.reload()')
+            assert dialogs==['beforeunload']
+            page.get_by_role('button',name=f"View details for {other['company']} · {other['title']}",exact=True).click()
+            page.locator('#opportunity-notes summary').click();expect(field).to_have_value('Second opportunity unsaved draft')
+            page.get_by_role('button',name='Discard edits and reload',exact=True).click();expect(field).to_have_value('')
+            assert not page.evaluate('()=>opportunityNotes.hasDrafts()') and not errors
+            browser.close()
+    finally:process.terminate();process.join(5)
