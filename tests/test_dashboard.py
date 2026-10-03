@@ -411,7 +411,7 @@ def test_demo_is_read_only_and_export_requires_auth(tmp_path):
             except OSError: time.sleep(.1)
         try: urllib.request.urlopen(base + '/api/export.csv'); assert False
         except urllib.error.HTTPError as error: assert error.code == 403
-        for endpoint in ('pause', 'resume-worker', 'run', 'facts', 'settings', 'complete-setup', 'backup', 'recover', 'answer-revoke', 'schedule-apply', 'company-skip'):
+        for endpoint in ('pause', 'resume-worker', 'run', 'discover', 'facts', 'settings', 'complete-setup', 'backup', 'recover', 'answer-revoke', 'schedule-apply', 'company-skip', 'company-allow'):
             request = urllib.request.Request(base + '/api/' + endpoint, data=b'{}', headers={'X-Hireme-Token': 'fixture-capability'})
             try: urllib.request.urlopen(request); assert False
             except urllib.error.HTTPError as error:
@@ -911,8 +911,22 @@ def test_company_shortcut_preserves_preference_drafts_and_shows_dialog_errors(st
             expect(page.locator('#heading')).to_be_focused()
             assert store.settings()['skip_companies'] == ['Acme']
             page.locator('#jobs .opportunity-details').click()
-            expect(page.locator('#skip-job-company')).to_have_text('Company is skipped')
-            expect(page.locator('#skip-job-company')).to_be_disabled()
+            expect(page.locator('#skip-job-company')).to_have_text('Include this company again')
+            expect(page.locator('#skip-job-company')).to_be_enabled()
+            assert page.request.post(base + '/api/company-allow', data={'id': job['id']}).status == 403
+            page.route('**/api/company-allow', lambda route: route.fulfill(status=400, json={'error': 'Synthetic inclusion failure'}))
+            page.locator('#skip-job-company').click()
+            expect(page.locator('#skip-company-help')).to_contain_text('Synthetic inclusion failure')
+            assert store.settings()['skip_companies'] == ['Acme']
+            page.unroute('**/api/company-allow')
+            page.locator('#skip-job-company').click()
+            expect(page.locator('#job-dialog')).not_to_be_visible()
+            expect(page.locator('#notice')).to_contain_text('Acme is no longer excluded')
+            assert store.settings()['skip_companies'] == []
+            assert store.db.execute('SELECT COUNT(*) FROM applications').fetchone()[0] == 0
+            assert store.db.execute('SELECT reason FROM jobs WHERE id=?', (job['id'],)).fetchone()[0] == 'company_blocked'
+            page.locator('#jobs .opportunity-details').click()
+            expect(page.locator('#skip-job-company')).to_have_text('Skip this company')
             assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
             browser.close()
     finally: process.terminate(); process.join(5)

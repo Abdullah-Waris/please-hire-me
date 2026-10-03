@@ -31,7 +31,7 @@ def skip_company(store, job_id):
             store.db.execute('UPDATE questions SET resolved=1 WHERE job_id=?', (jid,))
         store.event('company_skipped', key, {'company': company, 'opportunities_held': len(ids)})
     store.export_config()
-    return {'company': company, 'message': f'Future applications at {company} are skipped. You can change this in Preferences. Past attempts stay recorded.'}
+    return {'company': company, 'message': f'Future applications at {company} are skipped. Use Include this company again in opportunity details to remove the exclusion. Past attempts stay recorded.'}
 
 
 def annotate_companies(store, jobs):
@@ -39,3 +39,23 @@ def annotate_companies(store, jobs):
     normalize = company_normalizer(settings['company_aliases'])
     skipped = {normalize(name) for name in settings['skip_companies']}
     return [{**job, 'company_skipped': normalize(job['company']) in skipped} for job in jobs]
+
+
+def allow_company(store, job_id):
+    if not isinstance(job_id, str) or not job_id or len(job_id) > 100:
+        raise ValueError('Choose an existing opportunity')
+    with store.transaction():
+        job = store.db.execute('SELECT company FROM jobs WHERE id=?', (job_id,)).fetchone()
+        if not job: raise ValueError('Opportunity not found')
+        settings = store.settings()
+        normalize = company_normalizer(settings['company_aliases'])
+        key = normalize(job['company'])
+        remaining = [name for name in settings['skip_companies'] if normalize(name) != key]
+        removed = len(settings['skip_companies']) - len(remaining)
+        if removed:
+            settings = validate_settings({'skip_companies': remaining}, settings)
+            store.db.execute('UPDATE config SET value=? WHERE id=1', (json.dumps(settings),))
+        store.event('company_allowed', key, {'company': job['company'], 'exclusions_removed': removed})
+    store.export_config()
+    return {'company': job['company'], 'removed': removed,
+            'message': f"{job['company']} is no longer excluded. The next batch will reevaluate unattempted opportunities. Past attempts, company limits and uncertain outcomes stay recorded."}

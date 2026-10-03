@@ -2497,11 +2497,11 @@ function openOpportunity(job) {
   const payload = jobPayload(job),
     dialog = $("#job-dialog");
   dialog.dataset.jobId = job.id;
+  dialog.dataset.companySkipped = String(job.company_skipped);
   const unsavedPreferences = dirtyForms.has($("#settings-form"));
-  $("#skip-job-company").disabled =
-    state.demo || job.company_skipped || unsavedPreferences;
+  $("#skip-job-company").disabled = state.demo || unsavedPreferences;
   $("#skip-job-company").textContent = job.company_skipped
-    ? "Company is skipped"
+    ? "Include this company again"
     : "Skip this company";
   $("#skip-company-help").removeAttribute("role");
   $("#skip-company-help").textContent = state.demo
@@ -2509,7 +2509,7 @@ function openOpportunity(job) {
     : unsavedPreferences
       ? "Save your pending preferences before changing company boundaries."
       : job.company_skipped
-        ? "Manage your skipped companies in Preferences."
+        ? "Removes this company and its current aliases from exclusions. The next batch will reevaluate unattempted opportunities; limits and uncertain outcomes still apply."
         : "Stops future applications at this company and its configured aliases. Past attempts and uncertain outcomes stay recorded.";
   $("#job-dialog-title").textContent = job.title;
   $("#job-dialog-company").textContent = job.company;
@@ -2559,9 +2559,14 @@ $("#close-job-dialog").onclick = () => $("#job-dialog").close();
 $("#skip-job-company").onclick = async (event) => {
   event.target.disabled = true;
   try {
-    const result = await api("/api/company-skip", {
-      id: $("#job-dialog").dataset.jobId,
-    });
+    const result = await api(
+      $("#job-dialog").dataset.companySkipped === "true"
+        ? "/api/company-allow"
+        : "/api/company-skip",
+      {
+        id: $("#job-dialog").dataset.jobId,
+      },
+    );
     await refresh();
     $("#job-dialog").close();
     $("#heading").tabIndex = -1;
