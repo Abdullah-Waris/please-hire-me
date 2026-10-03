@@ -404,7 +404,63 @@
             recording an outcome. These jobs will never be retried
             automatically.
           </p>
-          <div id="uncertain"></div>
+          <div class="form-grid">
+            <label
+              >Show outcomes<select id="outcome-filter">
+                <option value="pending">All unresolved outcomes</option>
+                <option value="unknown">Uncertain submissions</option>
+                <option value="awaiting_verification">
+                  Email verification pending
+                </option>
+              </select></label
+            >
+            <label
+              >Search employer or role<input
+                id="outcome-search"
+                type="search"
+                maxlength="200"
+                autocomplete="off"
+            /></label>
+          </div>
+          <p id="outcome-draft-help" class="help" hidden>
+            Record or discard unfinished verification notes before changing
+            filters or pages.
+          </p>
+          <p id="outcome-error" class="help" role="alert" hidden></p>
+          <button id="outcome-retry" type="button" class="secondary" hidden>
+            Retry unresolved outcomes
+          </button>
+          <div
+            id="uncertain"
+            tabindex="-1"
+            role="region"
+            aria-label="Unresolved submission records"
+          ></div>
+          <div class="ledger-pagination">
+            <span
+              id="outcome-page"
+              class="help"
+              role="status"
+              aria-live="polite"
+            ></span>
+            <div class="actions">
+              <button
+                id="outcome-previous"
+                type="button"
+                class="secondary"
+                disabled
+              >
+                Previous outcomes</button
+              ><button
+                id="outcome-next"
+                type="button"
+                class="secondary"
+                disabled
+              >
+                Next outcomes
+              </button>
+            </div>
+          </div>
           <h2 class="section">Employer accounts</h2>
           <p>
             Complete held verification in the dedicated browser, then record

@@ -139,6 +139,66 @@ def test_question_pages_keep_old_employer_context_and_protect_unsaved_answers(st
     finally: process.terminate(); process.join(5)
 
 
+def test_unresolved_outcome_pages_preserve_old_context_and_require_explicit_verification(store, job):
+    from playwright.sync_api import sync_playwright, expect
+    from hireme.util import digest
+    from tests.test_outcome_ledger import insert_outcome
+    store.db.execute("UPDATE jobs SET company=?,status='unknown' WHERE id=?", ('Café 100%_ Labs', job['id']))
+    insert_outcome(store, 'old-uncertain', job['id'], stamp='2000-01-01T00:00:00+00:00')
+    for index in range(510):
+        extra = {**job, 'id': digest(f'outcome-job-{index}'), 'url': job['url'] + f'-outcome-{index}', 'company': f'Other employer {index}'}
+        store.upsert_job(extra); store.db.execute("UPDATE jobs SET score=100,status='unknown' WHERE id=?", (extra['id'],))
+        insert_outcome(store, f'outcome-{index:03}', extra['id'], 'unknown' if index % 2 else 'awaiting_verification')
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 320, 'height': 844}); errors = []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(base + '/#token=fixture-capability'); page.locator('[data-view=questions]').click()
+            expect(page.locator('#uncertain form')).to_have_count(25)
+            expect(page.locator('#outcome-page')).to_contain_text('1–25 of 511')
+            expect(page.locator('#uncertain')).to_contain_text('Café 100%_ Labs')
+            snapshot = page.request.get(base + '/api/state', headers={'X-Hireme-Token': 'fixture-capability'}).json()
+            assert job['id'] not in {row['id'] for row in snapshot['jobs']}
+            assert 'old-uncertain' not in {row['id'] for row in snapshot['applications']}
+            assert page.request.get(base + '/api/outcomes').status == 403
+            data = page.request.get(base + '/api/outcomes', headers={'X-Hireme-Token': 'fixture-capability'}).json()
+            assert all('package' not in row for row in data['applications'])
+            field = page.locator('#uncertain textarea').first
+            field.fill('Unfinished synthetic verification'); field.blur(); page.evaluate('refresh()')
+            expect(field).to_have_value('Unfinished synthetic verification')
+            expect(page.locator('#outcome-search')).to_be_disabled(); expect(page.locator('#outcome-filter')).to_be_disabled()
+            expect(page.locator('#outcome-next')).to_be_disabled()
+            page.locator('#uncertain [data-outcome-discard]').first.click()
+            page.locator('#outcome-next').click(); expect(page.locator('#outcome-page')).to_contain_text('26–50 of 511')
+            expect(page.locator('#uncertain')).to_be_focused()
+            page.route('**/api/outcomes*', lambda route: route.fulfill(status=503, json={'error': 'Synthetic outcome load failure'}))
+            page.locator('#outcome-search').fill('CAFÉ 100%_')
+            expect(page.locator('#outcome-error')).to_contain_text('Synthetic outcome load failure')
+            page.unroute('**/api/outcomes*'); page.locator('#outcome-retry').click()
+            expect(page.locator('#uncertain form')).to_have_count(1)
+            page.locator('#uncertain textarea').fill('Synthetic employer portal confirms no submission occurred')
+            page.locator('#uncertain button:not([type])').click()
+            assert store.db.execute("SELECT state FROM applications WHERE id='old-uncertain'").fetchone()[0] == 'unknown'
+            expect(page.locator('#uncertain select')).to_have_value('')
+            page.locator('#uncertain select').select_option('false')
+            page.locator('#uncertain button:not([type])').click()
+            expect(page.locator('#outcome-page')).to_contain_text('0 unresolved outcomes')
+            assert store.db.execute("SELECT state FROM applications WHERE id='old-uncertain'").fetchone()[0] == 'not_submitted'
+            assert store.db.execute('SELECT status FROM jobs WHERE id=?', (job['id'],)).fetchone()[0] == 'not_submitted'
+            assert store.settings()['live_enabled']
+            page.locator('#outcome-search').fill(''); page.locator('#outcome-filter').select_option('awaiting_verification')
+            expect(page.locator('#outcome-page')).to_contain_text('of 255')
+            assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            browser.close()
+    finally: process.terminate(); process.join(5)
+
+
 def test_dashboard_capability_csrf_host_and_xss(tmp_path):
     sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
     process=multiprocessing.Process(target=launch,args=(str(tmp_path/'private'),str(Path(__file__).parent.parent),port))

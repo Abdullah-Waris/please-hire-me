@@ -27,7 +27,7 @@ def seed(store):
         ('Cedar Labs', 'Software Engineer Intern', 'New York, NY', 'confirmed', 92, ''),
         ('Meridian', 'New Grad Software Engineer', 'Remote (US)', 'confirmed', 87, ''),
         ('Atlas Research', 'Research Engineering Intern', 'Seattle, WA', 'blocked', 89, 'An application question needs your answer.'),
-        ('Northstar', 'Software Engineer, Early Career', 'San Francisco, CA', 'discovered', 84, ''),
+        ('Northstar', 'Software Engineer, Early Career', 'San Francisco, CA', 'unknown', 84, 'Synthetic unclear submission outcome. No real application was sent.'),
         ('Fieldwork', 'Machine Learning Intern', 'Remote (US)', 'discovered', 82, ''),
         ('Openwater', 'Developer Intern', 'New York, NY', 'discovered', 78, ''),
     ]
@@ -38,15 +38,15 @@ def seed(store):
                       'demo', 'Invented example opportunity for the read-only workspace preview.')
         store.upsert_job(job)
         store.db.execute('UPDATE jobs SET status=?,score=?,reason=? WHERE id=?', (status, score, reason, job['id']))
-        if status == 'confirmed':
+        if status in ('confirmed', 'unknown'):
             store.db.execute('''INSERT INTO applications
                 (id,job_id,company_key,state,package,hash,created,updated,attempted,confirmation)
                 VALUES(?,?,?,?,?,?,?,?,?,?)''',
-                (f'demo-application-{index}', job['id'], store.company(company), 'confirmed',
+                (f'demo-application-{index}', job['id'], store.company(company), status,
                  json.dumps({'answers': [{'field': {'label': 'Experience'},
                     'value': 'This is a synthetic answer in the sample workspace.',
                     'provenance': {'template_id': 'demo'}}]}), 'demo', stamp, stamp, stamp,
-                 'Synthetic confirmation — no application was sent.'))
+                 'Synthetic confirmation — no application was sent.' if status == 'confirmed' else 'Synthetic unclear outcome — no application was sent.'))
             if index == 0:
                 qid = store.ask(job['id'], job['host'] + '|' + store.company(company),
                                 'Which engineering track interests you?', ['Infrastructure', 'Product engineering'])

@@ -140,6 +140,12 @@ def serve(root,repo,port=8766,token=None,demo=False,open_browser=False):
                     try:result=search_questions(store,search=query.get('search',[''])[0],offset=int(query.get('offset',['0'])[0]))
                     except ValueError as error:return self.send(400,{'error':str(error)})
                     return self.send(200,result)
+                if path=='/api/outcomes':
+                    from .outcome_ledger import search_outcomes
+                    query=parse_qs(urlsplit(self.path).query)
+                    try:result=search_outcomes(store,search=query.get('search',[''])[0],status=query.get('status',['pending'])[0],offset=int(query.get('offset',['0'])[0]))
+                    except ValueError as error:return self.send(400,{'error':str(error)})
+                    return self.send(200,result)
                 if path.startswith('/api/application/'):
                     try:record=store.application_record(unquote(path[len('/api/application/'):]))
                     except ValueError as error:return self.send(400,{'error':str(error)})

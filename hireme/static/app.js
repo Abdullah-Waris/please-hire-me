@@ -14,6 +14,12 @@ let refreshing = null;
 let backupBusy = false;
 let renderedAccountSignature = null;
 let aliasJsonMode = false;
+let outcomeState = null,
+  outcomeOffset = 0,
+  outcomeBusy = false,
+  outcomeRequest = 0,
+  outcomeTimer,
+  renderedOutcomeSignature = null;
 let questionState = null,
   questionOffset = 0,
   questionBusy = false,
@@ -198,6 +204,7 @@ function show(name) {
   if (name === "questions" && state) {
     loadAccountLedger();
     loadQuestionLedger();
+    loadOutcomeLedger();
   }
   $("#page-eyebrow").textContent = {
     setup: "YOUR NEXT CHAPTER",
@@ -909,6 +916,210 @@ for (const type of ["input", "change"])
   document.addEventListener(type, (event) => {
     if (event.target.closest?.("#question-list")) updateQuestionControls();
   });
+function outcomeDrafts() {
+  return [...document.querySelectorAll("#uncertain form")].filter((form) =>
+    dirtyForms.has(form),
+  );
+}
+function updateOutcomeControls() {
+  const draft = outcomeDrafts().length > 0;
+  $("#outcome-search").disabled = draft;
+  $("#outcome-filter").disabled = draft;
+  $("#outcome-retry").disabled = draft || outcomeBusy;
+  $("#outcome-previous").disabled =
+    draft || outcomeBusy || !outcomeState || outcomeState.offset === 0;
+  $("#outcome-next").disabled =
+    draft ||
+    outcomeBusy ||
+    !outcomeState ||
+    outcomeState.offset + outcomeState.limit >= outcomeState.total;
+  $("#outcome-draft-help").hidden = !draft;
+  for (const form of document.querySelectorAll("#uncertain form"))
+    form.querySelector("[data-outcome-discard]").hidden = !dirtyForms.has(form);
+  $("#outcome-page").textContent = outcomeState
+    ? outcomeState.total
+      ? outcomeState.applications.length
+        ? `${outcomeState.offset + 1}–${Math.min(outcomeState.offset + outcomeState.limit, outcomeState.total)} of ${outcomeState.total} unresolved outcomes`
+        : "Refreshing outcome page…"
+      : "0 unresolved outcomes"
+    : "Loading outcomes…";
+}
+async function loadOutcomeLedger(reset = false, focus = false) {
+  if (!state || outcomeBusy || outcomeDrafts().length) return;
+  if (reset) outcomeOffset = 0;
+  outcomeBusy = true;
+  updateOutcomeControls();
+  const request = ++outcomeRequest,
+    parent = $("#uncertain");
+  parent.setAttribute("aria-busy", "true");
+  try {
+    const result = await api(
+      `/api/outcomes?${new URLSearchParams({ search: $("#outcome-search").value, status: $("#outcome-filter").value, offset: outcomeOffset })}`,
+    );
+    if (request !== outcomeRequest) return;
+    outcomeState = result;
+    outcomeOffset = result.offset;
+    $("#outcome-error").hidden = true;
+    $("#outcome-retry").hidden = true;
+    renderOutcomes();
+    if (focus) {
+      parent.focus();
+      parent.scrollIntoView({ block: "start", behavior: "auto" });
+    }
+  } catch (error) {
+    $("#outcome-error").textContent =
+      `Could not load unresolved outcomes: ${error.message}`;
+    $("#outcome-error").hidden = false;
+    $("#outcome-retry").hidden = false;
+  } finally {
+    outcomeBusy = false;
+    parent.removeAttribute("aria-busy");
+    updateOutcomeControls();
+    if (request !== outcomeRequest && !outcomeDrafts().length)
+      loadOutcomeLedger(true);
+  }
+}
+function renderOutcomes() {
+  if (
+    [...document.querySelectorAll("#uncertain form")].some(
+      (form) => dirtyForms.has(form) || form.contains(document.activeElement),
+    )
+  ) {
+    updateOutcomeControls();
+    return;
+  }
+  const u = $("#uncertain");
+  if (!outcomeState) {
+    empty(u, "Loading unresolved outcomes…");
+    updateOutcomeControls();
+    return;
+  }
+  const signature = JSON.stringify([
+    outcomeState.applications,
+    state.demo,
+    $("#outcome-filter").value,
+    $("#outcome-search").value,
+  ]);
+  if (signature === renderedOutcomeSignature) {
+    updateOutcomeControls();
+    return;
+  }
+  renderedOutcomeSignature = signature;
+  u.replaceChildren();
+  const unknown = outcomeState.applications;
+  if (!unknown.length)
+    empty(
+      u,
+      $("#outcome-search").value.trim()
+        ? "No unresolved outcomes match your search."
+        : "No unresolved outcomes in this view.",
+    );
+  for (const a of unknown) {
+    const box = el("article", undefined, "question");
+    box.append(
+      el(
+        "h3",
+        a.company ? `${a.company} · ${a.title}` : a.company_key || a.job_id,
+      ),
+    );
+    if (a.url && !state.demo) box.append(link(a.url, "Verify at the employer"));
+    box.append(
+      el("p", `Attempt recorded: ${date(a.attempted || a.created)}`, "help"),
+    );
+    if (a.state === "awaiting_verification")
+      box.append(
+        el(
+          "p",
+          "Email verification pending. This application is held and will not be retried automatically.",
+          "subtle",
+        ),
+      );
+    const f = el("form"),
+      select = el("select");
+    select.setAttribute("aria-label", "Verified outcome");
+    select.required = true;
+    select.append(
+      new Option("Choose the outcome you verified", ""),
+      new Option("Employer confirms submission", "true"),
+      new Option("Verified no submission occurred", "false"),
+    );
+    const text = el("textarea");
+    text.required = true;
+    text.minLength = 10;
+    text.rows = 2;
+    text.placeholder = "How did you verify the outcome?";
+    text.setAttribute("aria-label", "Verification evidence");
+    const b = el("button", "Record verified outcome"),
+      discard = el("button", "Discard draft", "secondary");
+    b.disabled = state.demo;
+    discard.type = "button";
+    discard.dataset.outcomeDiscard = "true";
+    discard.hidden = true;
+    discard.onclick = () => {
+      text.value = "";
+      select.value = "";
+      saved(f);
+      updateOutcomeControls();
+      text.focus();
+    };
+    const actions = el("div", undefined, "actions");
+    actions.append(b, discard);
+    f.append(select, text, actions);
+    f.onsubmit = async (e) => {
+      e.preventDefault();
+      try {
+        await api("/api/reconcile", {
+          id: a.id,
+          submitted: select.value === "true",
+          note: text.value,
+        });
+        saved(f);
+        document.activeElement.blur();
+        box.remove();
+        const previousLength = outcomeState.applications.length;
+        outcomeState.applications = outcomeState.applications.filter(
+          (application) => application.id !== a.id,
+        );
+        if (outcomeState.applications.length < previousLength)
+          outcomeState.total = Math.max(0, outcomeState.total - 1);
+        renderedOutcomeSignature = null;
+        updateOutcomeControls();
+        await loadOutcomeLedger();
+        await refresh();
+        note(
+          "Outcome recorded. A non-submitted attempt remains held for manual handling.",
+        );
+      } catch (e) {
+        note(e.message, true);
+      }
+    };
+    box.append(f);
+    u.append(box);
+  }
+  updateOutcomeControls();
+}
+$("#outcome-search").addEventListener("input", () => {
+  clearTimeout(outcomeTimer);
+  outcomeRequest++;
+  outcomeTimer = setTimeout(() => loadOutcomeLedger(true), 220);
+});
+$("#outcome-filter").onchange = () => {
+  outcomeRequest++;
+  loadOutcomeLedger(true);
+};
+$("#outcome-previous").onclick = () => {
+  outcomeOffset = Math.max(0, outcomeOffset - (outcomeState?.limit || 25));
+  loadOutcomeLedger(false, true);
+};
+$("#outcome-next").onclick = () => {
+  outcomeOffset += outcomeState?.limit || 25;
+  loadOutcomeLedger(false, true);
+};
+$("#outcome-retry").onclick = () => loadOutcomeLedger(true);
+for (const type of ["input", "change"])
+  document.addEventListener(type, (event) => {
+    if (event.target.closest?.("#uncertain")) updateOutcomeControls();
+  });
 function renderQuestions() {
   if (
     [...document.querySelectorAll("#questions form")].some(
@@ -923,61 +1134,7 @@ function renderQuestions() {
     ),
     $("#blocked-jobs"),
   );
-  const u = $("#uncertain");
-  u.replaceChildren();
-  const unknown = state.applications.filter((a) =>
-    ["unknown", "awaiting_verification"].includes(a.state),
-  );
-  if (!unknown.length) empty(u, "No uncertain submissions.");
-  for (const a of unknown) {
-    const box = el("article", undefined, "question");
-    const job = state.jobs.find((j) => j.id === a.job_id);
-    box.append(el("h3", job ? `${job.company} · ${job.title}` : a.job_id));
-    if (job) box.append(link(job.url, "Verify at the employer"));
-    if (a.state === "awaiting_verification")
-      box.append(
-        el(
-          "p",
-          "Email verification pending. This application is held and will not be retried automatically.",
-          "subtle",
-        ),
-      );
-    const f = el("form"),
-      select = el("select");
-    select.setAttribute("aria-label", "Verified outcome");
-    select.append(
-      new Option("Employer confirms submission", "true"),
-      new Option("Verified no submission occurred", "false"),
-    );
-    const text = el("textarea");
-    text.required = true;
-    text.minLength = 10;
-    text.rows = 2;
-    text.placeholder = "How did you verify the outcome?";
-    text.setAttribute("aria-label", "Verification evidence");
-    const b = el("button", "Record verified outcome");
-    f.append(select, text, b);
-    f.onsubmit = async (e) => {
-      e.preventDefault();
-      try {
-        await api("/api/reconcile", {
-          id: a.id,
-          submitted: select.value === "true",
-          note: text.value,
-        });
-        saved(f);
-        document.activeElement.blur();
-        await refresh();
-        note(
-          "Outcome recorded. A non-submitted attempt remains held for manual handling.",
-        );
-      } catch (e) {
-        note(e.message, true);
-      }
-    };
-    box.append(f);
-    u.append(box);
-  }
+  renderOutcomes();
 }
 const groups = {
   Contact: [
