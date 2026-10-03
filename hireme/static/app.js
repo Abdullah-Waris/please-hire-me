@@ -15,6 +15,12 @@ let backupBusy = false;
 let renderedAccountSignature = null;
 let aliasJsonMode = false;
 let renderedBlockedSignature = null;
+let sourceHealthState = null,
+  sourceHealthOffset = 0,
+  sourceHealthBusy = false,
+  sourceHealthRequest = 0,
+  sourceHealthTimer,
+  renderedSourceHealthSignature = null;
 let runHistoryState = null,
   runHistoryOffset = 0,
   runHistoryBusy = false,
@@ -1724,6 +1730,109 @@ function renderRuns() {
   for (const run of state.runs.slice(0, 5)) parent.append(runRow(run));
 }
 
+function updateSourceHealthControls() {
+  $("#source-health-previous").disabled =
+    sourceHealthBusy || !sourceHealthState || sourceHealthState.offset === 0;
+  $("#source-health-next").disabled =
+    sourceHealthBusy ||
+    !sourceHealthState ||
+    sourceHealthState.offset + sourceHealthState.limit >=
+      sourceHealthState.total;
+  $("#source-health-retry").disabled = sourceHealthBusy;
+  $("#source-health-page").textContent = sourceHealthState
+    ? sourceHealthState.total
+      ? `${sourceHealthState.offset + 1}–${Math.min(sourceHealthState.offset + sourceHealthState.limit, sourceHealthState.total)} of ${sourceHealthState.total} sources`
+      : "0 sources"
+    : "Loading source checks…";
+}
+async function loadSourceHealth(reset = false, focus = false) {
+  if (!state || sourceHealthBusy) return;
+  if (reset) sourceHealthOffset = 0;
+  sourceHealthBusy = true;
+  updateSourceHealthControls();
+  const request = ++sourceHealthRequest,
+    parent = $("#sources");
+  parent.setAttribute("aria-busy", "true");
+  try {
+    const result = await api(
+      `/api/sources?${new URLSearchParams({ search: $("#source-search").value, status: $("#source-filter").value, offset: sourceHealthOffset })}`,
+    );
+    if (request !== sourceHealthRequest) return;
+    sourceHealthState = result;
+    sourceHealthOffset = result.offset;
+    const signature = JSON.stringify(result.sources);
+    if (signature !== renderedSourceHealthSignature) {
+      parent.replaceChildren();
+      if (!result.sources.length)
+        empty(
+          parent,
+          result.summary.total
+            ? "No source checks match these filters."
+            : "Source checks appear after finding opportunities. Earlier opportunities stay saved if a source is temporarily unavailable.",
+          result.summary.total ? "Try another search" : "Discovery is ready",
+          "↗",
+        );
+      for (const source of result.sources) {
+        const row = el("div", undefined, "source-health-row");
+        row.append(
+          el("strong", source.id),
+          el(
+            "p",
+            `${source.status === "ok" ? "Available" : source.status === "error" ? "Unavailable" : source.status} · Checked ${date(source.checked)}`,
+            "help",
+          ),
+        );
+        if (source.error) row.append(el("p", source.error, "subtle"));
+        parent.append(row);
+      }
+      renderedSourceHealthSignature = signature;
+    }
+    const summary = `${result.summary.total} sources checked · ${result.summary.available} available · ${result.summary.unavailable} unavailable`;
+    if ($("#source-health-summary").textContent !== summary)
+      $("#source-health-summary").textContent = summary;
+    $("#source-health-error").hidden = true;
+    $("#source-health-retry").hidden = true;
+    if (focus) {
+      parent.focus();
+      parent.scrollIntoView({ block: "start", behavior: "auto" });
+    }
+  } catch (error) {
+    $("#source-health-error").textContent =
+      `Could not load source checks: ${error.message}`;
+    $("#source-health-error").hidden = false;
+    $("#source-health-retry").hidden = false;
+  } finally {
+    sourceHealthBusy = false;
+    parent.removeAttribute("aria-busy");
+    updateSourceHealthControls();
+    if (request !== sourceHealthRequest) loadSourceHealth(true);
+  }
+}
+$("#source-health-panel").ontoggle = () => {
+  if ($("#source-health-panel").open) loadSourceHealth();
+};
+$("#source-search").addEventListener("input", () => {
+  clearTimeout(sourceHealthTimer);
+  sourceHealthRequest++;
+  sourceHealthTimer = setTimeout(() => loadSourceHealth(true), 220);
+});
+$("#source-filter").onchange = () => {
+  sourceHealthRequest++;
+  loadSourceHealth(true);
+};
+$("#source-health-previous").onclick = () => {
+  sourceHealthOffset = Math.max(
+    0,
+    sourceHealthOffset - (sourceHealthState?.limit || 25),
+  );
+  loadSourceHealth(false, true);
+};
+$("#source-health-next").onclick = () => {
+  sourceHealthOffset += sourceHealthState?.limit || 25;
+  loadSourceHealth(false, true);
+};
+$("#source-health-retry").onclick = () => loadSourceHealth(true);
+
 function updateRunHistoryControls() {
   $("#run-history-previous").disabled =
     runHistoryBusy || !runHistoryState || runHistoryState.offset === 0;
@@ -1896,22 +2005,7 @@ function render() {
   if (!editing("#facts-form")) renderFacts();
   if (!editing("#settings-form")) renderSettings();
   renderRuns();
-  const sources = $("#sources");
-  sources.replaceChildren();
-  if (!state.sources.length)
-    empty(
-      sources,
-      "Source checks appear after discovery. Your desk keeps earlier opportunities if a source is temporarily unavailable.",
-      "Discovery is ready",
-      "↗",
-    );
-  for (const source of state.sources)
-    sources.append(
-      el(
-        "p",
-        `${source.id}: ${source.status} · ${date(source.checked)}${source.error ? " · " + source.error : ""}`,
-      ),
-    );
+  if ($("#source-health-panel").open) loadSourceHealth();
   show(view);
 }
 async function refresh() {

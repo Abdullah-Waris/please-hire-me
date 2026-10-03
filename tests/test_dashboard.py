@@ -487,6 +487,57 @@ def test_complete_batch_history_pages_searches_old_notes_and_retries(store):
     finally: process.terminate(); process.join(5)
 
 
+def test_complete_source_health_search_pages_retry_and_mobile_layout(store):
+    for index in range(110):
+        store.db.execute('INSERT INTO sources VALUES(?,?,?,?,?)',
+                         (f'source-{index:03}', 'ok', '2026-10-03T12:00:00+00:00', '', '{}'))
+    store.db.execute('INSERT INTO sources VALUES(?,?,?,?,?)',
+                     ('old-Café-100%_', 'error', '2000-01-01T00:00:00+00:00', '<script>synthetic timeout</script>', '{}'))
+    from playwright.sync_api import sync_playwright, expect
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 320, 'height': 844}); errors = []; requests = []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.on('request', lambda request: requests.append(request.url) if '/api/sources' in request.url else None)
+            page.goto(base + '/#token=fixture-capability')
+            expect(page.locator('#jobs')).to_contain_text('Your next chapter starts here')
+            assert not requests and page.request.get(base + '/api/sources').status == 403
+            page.locator('#source-health-panel > summary').click()
+            expect(page.locator('#sources .source-health-row')).to_have_count(25)
+            expect(page.locator('#source-health-summary')).to_have_text('111 sources checked · 110 available · 1 unavailable')
+            expect(page.locator('#sources')).to_contain_text('<script>synthetic timeout</script>')
+            assert page.locator('#sources script').count() == 0
+            page.locator('#source-health-next').click()
+            expect(page.locator('#source-health-page')).to_contain_text('26–50 of 111')
+            expect(page.locator('#sources')).to_be_focused()
+            page.locator('#source-search').fill('source-109')
+            expect(page.locator('#source-health-page')).to_contain_text('1–1 of 1')
+            expect(page.locator('#sources')).to_contain_text('source-109')
+            page.locator('#source-search').fill('')
+            expect(page.locator('#source-health-page')).to_contain_text('1–25 of 111')
+            page.locator('#source-filter').select_option('error')
+            expect(page.locator('#source-health-page')).to_contain_text('1–1 of 1')
+            expect(page.locator('#sources')).to_contain_text('Unavailable')
+            page.route('**/api/sources*', lambda route: route.fulfill(status=503, json={'error': 'Synthetic source checks unavailable'}))
+            page.locator('#source-search').fill('CAFÉ-100%_')
+            expect(page.locator('#source-health-error')).to_contain_text('Synthetic source checks unavailable')
+            page.unroute('**/api/sources*'); page.locator('#source-health-retry').click()
+            expect(page.locator('#source-health-error')).to_be_hidden()
+            expect(page.locator('#sources .source-health-row')).to_have_count(1)
+            page.locator('#source-filter').select_option('ok')
+            expect(page.locator('#source-health-page')).to_have_text('0 sources')
+            expect(page.locator('#source-health-summary')).to_contain_text('111 sources checked')
+            assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            browser.close()
+    finally: process.terminate(); process.join(5)
+
+
 def test_dashboard_capability_csrf_host_and_xss(tmp_path):
     sock=socket.socket();sock.bind(('127.0.0.1',0));port=sock.getsockname()[1];sock.close()
     process=multiprocessing.Process(target=launch,args=(str(tmp_path/'private'),str(Path(__file__).parent.parent),port))

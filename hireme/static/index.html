@@ -401,9 +401,74 @@
               </div>
             </div>
           </details>
-          <details class="section">
+          <details id="source-health-panel" class="section">
             <summary>Discovery source health</summary>
-            <div id="sources"></div>
+            <p class="help">
+              The latest check for each source. Earlier opportunities stay saved
+              when a source is unavailable.
+            </p>
+            <p id="source-health-summary" class="help" role="status"></p>
+            <div class="ledger-toolbar">
+              <label
+                >Search source or error<input
+                  id="source-search"
+                  type="search"
+                  maxlength="200"
+                  autocomplete="off"
+              /></label>
+              <label
+                >Source status<select id="source-filter">
+                  <option value="all">All sources</option>
+                  <option value="error">Unavailable</option>
+                  <option value="ok">Available</option>
+                </select></label
+              >
+            </div>
+            <p
+              id="source-health-error"
+              class="callout error"
+              role="alert"
+              hidden
+            ></p>
+            <button
+              id="source-health-retry"
+              type="button"
+              class="secondary"
+              hidden
+            >
+              Retry source health
+            </button>
+            <div
+              id="sources"
+              tabindex="-1"
+              role="region"
+              aria-label="Discovery source checks"
+            ></div>
+            <div class="ledger-pagination">
+              <span
+                id="source-health-page"
+                class="help"
+                role="status"
+                aria-live="polite"
+              ></span>
+              <div class="actions">
+                <button
+                  id="source-health-previous"
+                  type="button"
+                  class="secondary"
+                  disabled
+                >
+                  Previous sources</button
+                ><button
+                  id="source-health-next"
+                  type="button"
+                  class="secondary"
+                  disabled
+                >
+                  Next sources
+                </button>
+              </div>
+            </div>
           </details>
         </section>
         <section id="questions" class="view" hidden>
