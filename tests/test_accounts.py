@@ -82,3 +82,19 @@ def test_changed_identity_and_symlinks_are_held(store, tmp_path):
     path.symlink_to(tmp_path / 'outside')
     with pytest.raises(Blocked, match='account_credentials_unavailable'):
         vault.credentials(ORIGIN, 'Other', create=True)
+
+
+def test_signin_crash_is_held_and_manual_confirmation_is_scoped(store):
+    vault=AccountVault(store)
+    vault.credentials(ORIGIN,'Acme',create=True)
+    key=vault.begin_creation(ORIGIN,'Acme')
+    vault.finish_creation(key,confirmed=True)
+    vault.begin_signin(key)
+    store.recover()
+    with pytest.raises(Blocked,match='account_creation_held'):vault.begin_signin(key)
+    with pytest.raises(ValueError):vault.reconcile(key,'short')
+    vault.reconcile(key,'Verified account and signed-in session in dedicated browser')
+    assert store.db.execute('SELECT state FROM employer_accounts WHERE id=?',(key,)).fetchone()[0]=='confirmed'
+    with pytest.raises(ValueError):vault.reconcile(key,'Already confirmed account cannot be reconciled twice')
+    with pytest.raises(ValueError,match='Applicant identity cannot change'):
+        store.put_facts({'email':'another@candidate.invalid'})

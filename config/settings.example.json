@@ -62,5 +62,6 @@
   "min_fit_score": 45,
   "max_years_required": 1,
   "model_timeout_seconds": 90,
-  "cycle_timeout_seconds": 10800
+  "cycle_timeout_seconds": 10800,
+  "employer_accounts": false
 }

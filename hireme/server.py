@@ -161,6 +161,12 @@ def serve(root,repo,port=8766,token=None):
                     elif path=='/api/reconcile':
                         if type(data.get('submitted')) is not bool:raise ValueError('Choose submitted or not submitted')
                         store.reconcile(data['id'],data['submitted'],data['note']);result={'saved':True}
+                    elif path=='/api/account-confirm':
+                        from .accounts import AccountVault
+                        from .util import Blocked
+                        try:AccountVault(store).reconcile(data['id'],data['note'])
+                        except Blocked as e:return self.send(409,{'error':e.reason})
+                        result={'saved':True}
                     elif path=='/api/job':
                         from .discovery import posting
                         job=posting(data['url'],data['company'],data['title'],data['location'],'user',data.get('description',''))

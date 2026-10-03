@@ -82,11 +82,39 @@ def test_transcript_upload_replace_invalid_and_responsive_ui(tmp_path):
             expect(page.locator('#notice')).to_contain_text('Transcript saved')
             updated=store.db.execute("SELECT hash FROM documents WHERE kind='transcript'").fetchone()[0]
             assert updated!=original
+            page.locator('[data-view="settings"]').click()
+            expect(page.locator('[name="employer_accounts"]')).not_to_be_checked()
+            page.set_viewport_size({'width':390,'height':844})
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            page.locator('[name="employer_accounts"]').check()
+            captures=tmp_path/'ui';captures.mkdir(parents=True,exist_ok=True)
+            page.screenshot(path=str(captures/'employer-preferences-mobile.png'))
+            page.get_by_role('button',name='Save preferences',exact=True).click()
+            expect(page.locator('#notice')).to_contain_text('Search preferences saved')
+            assert store.settings()['employer_accounts'] is True
+            from hireme.accounts import AccountVault
+            store.put_facts({'email':'test@candidate.invalid'})
+            vault=AccountVault(store)
+            vault.credentials('https://careers.example.com','Synthetic employer',create=True)
+            key=vault.begin_creation('https://careers.example.com','Synthetic employer')
+            vault.finish_creation(key,confirmed=False)
+            page.reload()
+            page.locator('[data-view="questions"]').click()
+            evidence=page.get_by_label('Account confirmation evidence for Synthetic employer')
+            expect(evidence).to_be_visible()
+            assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+            evidence.scroll_into_view_if_needed()
+            page.screenshot(path=str(captures/'employer-account-mobile.png'))
+            evidence.fill('Verified account exists and sign-in succeeded in dedicated browser')
+            page.get_by_role('button',name='Confirm verified account',exact=True).click()
+            expect(page.locator('#notice')).to_contain_text('Account confirmed')
+            assert store.db.execute('SELECT state FROM employer_accounts WHERE id=?',(key,)).fetchone()[0]=='confirmed'
+            page.locator('[data-view="profile"]').click()
             for width,height,name in [(1440,1000,'desktop'),(390,844,'mobile')]:
                 page.set_viewport_size({'width':width,'height':height})
                 page.locator('#transcript-state').scroll_into_view_if_needed()
                 assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
-                captures=Path('tmp/ui');captures.mkdir(parents=True,exist_ok=True)
+                captures=tmp_path/'ui';captures.mkdir(parents=True,exist_ok=True)
                 page.screenshot(path=str(captures/('transcript-'+name+'.png')))
             assert not errors
             store.close();browser.close()

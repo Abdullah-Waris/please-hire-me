@@ -1,13 +1,14 @@
-"""Private credentials and durable intent for future employer account adapters.
+"""Private credentials, durable auth intent, and native employer account forms.
 
-This module performs no network actions. Passwords never enter the ledger,
-events, model context, dashboard snapshots, or portable backups.
+Passwords never enter the ledger, events, model context, dashboard snapshots,
+or portable backups. Browser auth grants are distinct from application intent.
 """
 from __future__ import annotations
 
 import json
 import secrets
-from urllib.parse import urlsplit
+import re
+from urllib.parse import urlsplit, urlunsplit
 
 from .util import Blocked, atomic_json, digest, now, private_dir
 
@@ -71,12 +72,145 @@ class AccountVault:
         return key
 
     def finish_creation(self, key, *, confirmed):
+        self._finish(key,confirmed,'creating','account_creation_result')
+
+    def begin_signin(self, key):
+        with self.store.transaction():
+            self.store.checkpoint()
+            row=self.store.db.execute('SELECT state FROM employer_accounts WHERE id=?',(key,)).fetchone()
+            if not row or row['state']!='confirmed':
+                raise Blocked('account_creation_held')
+            self.store.db.execute("UPDATE employer_accounts SET state='signing_in',updated=? WHERE id=?",(now(),key))
+            self.store.event('account_signin_intent',key,{})
+
+    def finish_signin(self, key, *, confirmed):
+        self._finish(key,confirmed,'signing_in','account_signin_result')
+
+    def _finish(self,key,confirmed,expected,event):
         if not isinstance(confirmed, bool):
             raise ValueError('An explicit account confirmation is required')
         with self.store.transaction():
             row = self.store.db.execute('SELECT state FROM employer_accounts WHERE id=?', (key,)).fetchone()
-            if not row or row['state'] != 'creating':
+            if not row or row['state'] != expected:
                 raise Blocked('account_creation_held')
             state = 'confirmed' if confirmed else 'uncertain'
             self.store.db.execute('UPDATE employer_accounts SET state=?,updated=? WHERE id=?', (state, now(), key))
-            self.store.event('account_creation_result', key, {'state': state})
+            self.store.event(event, key, {'state': state})
+
+    def reconcile(self, key, note):
+        if not isinstance(note,str) or not 10<=len(note.strip())<=2000:
+            raise ValueError('Describe how you verified the account and signed-in session')
+        from .store import worker_lock
+        with worker_lock(self.store.root), self.store.transaction():
+            row=self.store.db.execute('SELECT * FROM employer_accounts WHERE id=?',(key,)).fetchone()
+            if not row or row['state']!='uncertain':
+                raise ValueError('Only an uncertain account can be reconciled')
+            self.credentials(row['origin'],row['company'])
+            self.store.db.execute("UPDATE employer_accounts SET state='confirmed',updated=? WHERE id=?",(now(),key))
+            self.store.event('account_manually_confirmed',key,{'note':note.strip()})
+
+
+def complete_native_account(browser, job):
+    """Handle a same-origin, native HTML account form after posting eligibility.
+
+    JS/SSO flows, extra required fields, agreement checkboxes, verification and
+    ambiguous success remain held. A single exact POST is authorized; this is
+    never application-submit authorization.
+    """
+    store=browser.store
+    store.checkpoint()
+    if not store.settings()['employer_accounts'] or not store.settings()['live_enabled']:
+        raise Blocked('account_automation_disabled')
+    store._check_budget(job,store.settings())
+    if browser.denied_write:
+        raise Blocked('unapproved_draft_write')
+    page=browser.page
+    if page.locator('iframe[src*="bframe"],iframe[src*="hcaptcha"],iframe[src*="challenges.cloudflare.com"]').count():
+        raise Blocked('captcha_blocked')
+    from .answers import REFUSE
+    if REFUSE.search(page.locator('body').inner_text()):
+        raise Blocked('human_work_sample')
+    forms=page.locator('form').filter(has=page.locator('input[type=password]'))
+    if forms.count()!=1:
+        raise Blocked('unsupported_account_form')
+    form=forms.first
+    info=form.evaluate("""f=>({action:f.action,method:f.method,enctype:f.enctype,
+       inputs:Array.from(f.elements).map(e=>({name:e.name,type:e.type,value:e.value,
+         disabled:e.disabled,label:Array.from(e.labels||[]).map(l=>l.textContent.trim()).join(' ')}))})""")
+    action=urlsplit(info['action']);current=urlsplit(page.url)
+    local=bool(browser.test_url and page.url.startswith(browser.test_url))
+    if (info['method'].lower()!='post' or info['enctype']!='application/x-www-form-urlencoded'
+            or action.netloc!=current.netloc or action.scheme!=current.scheme
+            or action.username or action.password or action.query or action.fragment
+            or (not local and (action.scheme!='https' or action.hostname!=browser.current_host))):
+        raise Blocked('unsupported_account_destination')
+    fields=[f for f in info['inputs'] if not f['disabled'] and f['type'] not in ('hidden','submit','button')]
+    passwords=[f for f in fields if f['type']=='password']
+    emails=[f for f in fields if f['type'] in ('email','text') and re.fullmatch(r'(?:email(?: address)?|username)',f['label'],re.I)]
+    if (len(passwords) not in (1,2) or len(emails)!=1 or len(fields)!=len(passwords)+1
+            or any(not f['name'] for f in fields) or len({f['name'] for f in fields})!=len(fields)):
+        raise Blocked('unsupported_account_form')
+    creating=len(passwords)==2
+    expected=re.compile(r'^(?:create account|register|sign up)$' if creating else r'^(?:sign in|log in)$',re.I)
+    buttons=form.get_by_role('button',name=expected)
+    if buttons.count()!=1 or buttons.first.evaluate('(e)=>e.type')!='submit':
+        raise Blocked('unsupported_account_form')
+    origin=urlunsplit(('https',current.netloc,'','','')) if not local else 'https://fixture.invalid'
+    # Scope is stable across applications for this employer on this exact host.
+    company=store.company(job['company'])
+    vault=AccountVault(store)
+    key=account_key(origin,company)
+    row=store.db.execute('SELECT state FROM employer_accounts WHERE id=?',(key,)).fetchone()
+    if row and row['state']!='confirmed':
+        raise Blocked('account_creation_held')
+    if creating and row:
+        raise Blocked('account_creation_held')
+    if not creating and not row:
+        raise Blocked('account_credentials_unavailable')
+    credentials=vault.credentials(origin,company,create=creating)
+    controls=form.locator('input').all()
+    for f in fields:
+        matches=[el for el in controls if el.get_attribute('name')==f['name']]
+        if len(matches)!=1:
+            raise Blocked('unsupported_account_form')
+        matches[0].fill(credentials['password'] if f['type']=='password' else credentials['email'])
+    if not form.evaluate('(f)=>f.checkValidity()'):
+        raise Blocked('account_password_policy')
+    pairs=form.evaluate('(f)=>Array.from(new FormData(f).entries())')
+    # Submit-button values are intentionally unsupported; no extra hidden writes.
+    if buttons.first.get_attribute('name'):
+        raise Blocked('unsupported_account_form')
+    store.checkpoint()
+    if not store.settings()['employer_accounts'] or not store.settings()['live_enabled']:
+        raise Blocked('account_automation_disabled')
+    if creating:
+        vault.begin_creation(origin,company)
+    else:
+        vault.begin_signin(key)
+    browser.auth_write={'url':info['action'],'pairs':pairs,'used':False}
+    confirmed=False
+    try:
+        store.checkpoint()
+        buttons.first.click()
+        browser._wait_ready()
+        store.checkpoint()
+        body=page.locator('body').inner_text()
+        confirmed=(browser.auth_write['used'] and not browser.denied_write
+                   and urlsplit(page.url).netloc==current.netloc
+                   and not page.locator('input[type=password]').count()
+                   and bool(re.search(r'\b(?:sign out|log out|logout)\b',body,re.I)))
+        if creating:
+            confirmed=confirmed and bool(re.search(r'account (?:successfully )?created|registration (?:complete|successful)',body,re.I))
+    except Blocked:
+        raise
+    except Exception:
+        raise Blocked('account_result_uncertain') from None
+    finally:
+        browser.auth_write=None
+        if creating:
+            vault.finish_creation(key,confirmed=bool(confirmed))
+        else:
+            vault.finish_signin(key,confirmed=bool(confirmed))
+    if not confirmed:
+        raise Blocked('account_result_uncertain')
+    store.event('account_session_ready',key,{})

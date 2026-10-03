@@ -139,8 +139,9 @@ class Store:
         with self.transaction():
             old = self.facts(False)
             if "email" in old and old["email"]["confirmed"] and "email" in values and values["email"] != old["email"]["value"]:
-                if self.db.execute("SELECT 1 FROM applications LIMIT 1").fetchone():
-                    raise ValueError("Applicant identity cannot change after application history exists")
+                if (self.db.execute("SELECT 1 FROM applications LIMIT 1").fetchone()
+                        or self.db.execute("SELECT 1 FROM employer_accounts LIMIT 1").fetchone()):
+                    raise ValueError("Applicant identity cannot change after application or account history exists")
             for key, value in values.items():
                 self.db.execute("""INSERT INTO facts VALUES(?,?,?,?,?,?) ON CONFLICT(key) DO UPDATE SET
                   value=excluded.value, source=excluded.source, confirmed=excluded.confirmed,
@@ -348,7 +349,7 @@ class Store:
 
     def recover(self):
         with self.transaction():
-            self.db.execute("UPDATE employer_accounts SET state='uncertain',updated=? WHERE state='creating'",(now(),))
+            self.db.execute("UPDATE employer_accounts SET state='uncertain',updated=? WHERE state IN ('creating','signing_in')",(now(),))
             rows=list(self.db.execute("SELECT id,job_id FROM applications WHERE state='submitting'"))
             for r in rows:
                 self.db.execute("UPDATE applications SET state='unknown',updated=? WHERE id=?",(now(),r[0]))
@@ -379,6 +380,7 @@ class Store:
                 "questions":rows("SELECT * FROM questions WHERE resolved=0 ORDER BY rowid"),
                 "runs":rows("SELECT * FROM runs ORDER BY started DESC LIMIT 30"),
                 "sources":rows("SELECT * FROM sources ORDER BY checked DESC LIMIT 100"),
+                "employer_accounts":rows("SELECT * FROM employer_accounts ORDER BY updated DESC LIMIT 100"),
                 "documents":rows("SELECT * FROM documents"),"materials":[dict(r) for r in self.db.execute("SELECT * FROM materials ORDER BY created DESC,id DESC LIMIT 20 OFFSET ?",(material_offset,))],"material_count":self.db.execute("SELECT count(*) FROM materials").fetchone()[0],"material_offset":material_offset}
 
 

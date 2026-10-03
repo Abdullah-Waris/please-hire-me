@@ -7,7 +7,7 @@ import re
 import shutil
 import time
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, parse_qsl
 
 from .answers import resolve,REFUSE,field_key
 from .discovery import ATS_HOSTS,PORTAL_HOSTS
@@ -68,6 +68,7 @@ class Browser:
     def __init__(self,store,test_url=None):
         self.store=store; self.test_url=test_url; self.context=None; self.playwright=None
         self.page=None; self.aid=None; self.attempted=False; self.current_host=""; self.host_cache={}; self.denied_write=False; self.upload_payloads={}; self.uploaded_files=set()
+        self.auth_write=None
 
     def __enter__(self):
         from playwright.sync_api import sync_playwright
@@ -104,6 +105,19 @@ class Browser:
             try:self.store.checkpoint()
             except Blocked:return route.abort()
         url=route.request.url; p=urlsplit(url)
+        if self.auth_write and route.request.method not in ('GET','HEAD','OPTIONS'):
+            grant=self.auth_write
+            settings=self.store.settings()
+            if not settings['employer_accounts'] or not settings['live_enabled']:
+                return route.abort()
+            pairs=parse_qsl(route.request.post_data or '',keep_blank_values=True)
+            approved=(not grant['used'] and route.request.method=='POST'
+                      and url==grant['url'] and sorted(pairs)==sorted(tuple(pair) for pair in grant['pairs']))
+            if approved:
+                grant['used']=True
+                return route.continue_()
+            self.denied_write=True
+            return route.abort()
         if self.test_url and url.startswith(self.test_url):return route.continue_()
         host=p.hostname
         if p.scheme!="https" or not host or p.port not in (None,443):return route.abort()
@@ -357,7 +371,7 @@ class Browser:
         if self.page.locator('[aria-invalid=true]').count() or not self.page.evaluate('() => Array.from(document.forms).every(f=>f.checkValidity())'):raise Blocked('invalid_fields')
 
     def apply(self,job,live=True):
-        self.aid=None; self.attempted=False; self.denied_write=False; self.upload_payloads={}; self.uploaded_files=set()
+        self.aid=None; self.attempted=False; self.denied_write=False; self.upload_payloads={}; self.uploaded_files=set();self.auth_write=None
         self.current_host=job['host']
         if self.test_url:self.current_host=urlsplit(self.test_url).hostname
         elif job['host'] not in ATS_HOSTS|PORTAL_HOSTS:raise Blocked('unapproved_destination')
@@ -365,7 +379,7 @@ class Browser:
         self._wait_ready()
         text=self._guard(job)
         # Portal host registration is not proof of a session; inspect the current page too.
-        if job['host'] in PORTAL_HOSTS and job['host'] not in self.store.settings()['signed_in_portals'] and job['host'] not in {'www.deshaw.com','explore.jobs.netflix.net','career.mlp.com','jobs.uber.com','www.rentec.com'}:
+        if job['host'] in PORTAL_HOSTS and job['host'] not in self.store.settings()['signed_in_portals'] and not self.store.settings()['employer_accounts'] and job['host'] not in {'www.deshaw.com','explore.jobs.netflix.net','career.mlp.com','jobs.uber.com','www.rentec.com'}:
             raise Blocked('account_blocked','Sign in through the dedicated browser and register this portal')
         # Read the actual posting again before policy checks: list feeds are not eligibility proof.
         from .policy import eligible
@@ -374,7 +388,13 @@ class Browser:
         self.store.upsert_job(job)
         all_answers=[]; all_docs=[]; steps=[]
         for step in range(8):
-            self._guard(job)
+            try:self._guard(job)
+            except Blocked as e:
+                if e.reason=='account_blocked' and live and self.store.settings()['employer_accounts']:
+                    from .accounts import complete_native_account
+                    complete_native_account(self,job)
+                    continue
+                raise
             fields=self._snapshot()
             if not fields:
                 apply=self.page.get_by_role('button',name=re.compile(r'^(?:apply(?: now| for this job)?|application)$',re.I))
