@@ -47,6 +47,7 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,
                     ranked.append((score,job))
                 except Blocked as e:
                     store.block(job['id'],e.reason,e.detail);reasons[e.reason]=reasons.get(e.reason,0)+1
+                    store.event('job_screening_blocked',job['id'],{'run_id':rid,'outcome':'blocked','reason':e.reason,'detail':e.detail})
             today=datetime.now(ZoneInfo(s['timezone'])).date()
             sent_today=sum(1 for r in store.db.execute("SELECT attempted FROM applications WHERE state='confirmed'")
                           if r[0] and datetime.fromisoformat(r[0]).astimezone(ZoneInfo(s['timezone'])).date()==today)

@@ -14,15 +14,21 @@ def queue_report(store, run_id):
     if not run or not run['finished']:
         raise ValueError('Only completed or stopped runs can be reported')
     email = owner_email(store)
-    outcomes = []
-    for e in store.db.execute("SELECT subject,detail FROM events WHERE kind='application_finished' AND timestamp>=? ORDER BY seq", (run['started'],)):
+    groups = {'Applied successfully': [], 'Blocked — review or apply manually': [], 'Other outcomes — review before retrying': []}
+    for e in store.db.execute("SELECT subject,detail FROM events WHERE kind IN ('application_finished','job_screening_blocked') AND timestamp>=? ORDER BY seq", (run['started'],)):
         detail = json.loads(e['detail'])
         if detail.get('run_id') != run_id:
             continue
         job = store.db.execute('SELECT company,title,url FROM jobs WHERE id=?', (e['subject'],)).fetchone()
         if job:
-            outcomes.append(f"{job['company']} — {job['title']}: {detail['outcome']}"
-                            + (f" ({detail['reason']})" if detail.get('reason') else '') + f"\n{job['url']}")
+            group = ('Applied successfully' if detail['outcome'] == 'confirmed' else
+                     'Blocked — review or apply manually' if detail['outcome'] == 'blocked' else
+                     'Other outcomes — review before retrying')
+            groups[group].append(f"{job['company']} — {job['title']}: {detail['outcome']}"
+                                 + (f" ({detail['reason']})" if detail.get('reason') else '')
+                                 + (f"\n{detail['detail']}" if detail.get('detail') else '')
+                                 + f"\n{job['url']}")
+    outcomes = [heading + '\n\n' + '\n\n'.join(items) for heading, items in groups.items() if items]
     detail = json.loads(run['detail']) if run['detail'].startswith('{') else {'reason': run['detail']}
     body = (f"Application batch {run_id}\nStarted: {run['started']}\nFinished: {run['finished']}\n"
             f"Status: {run['status']}\nMode: {detail.get('mode', 'live')}\n"
@@ -30,7 +36,11 @@ def queue_report(store, run_id):
             + ('\n\n'.join(outcomes) or 'No application outcomes recorded.'))
     if detail.get('reason'):
         body += '\n\nStopped because: ' + detail['reason']
-    body += '\n\nOpen Application desk on the Pi: http://127.0.0.1:8766 (through Raspberry Pi Connect).\n'
+    body += ('\n\nOpen the job links above on your phone to review or apply. Confirmed submissions are already applied. '
+             'For uncertain submissions, check with the employer before applying again.\n'
+             'After applying yourself, return to Application desk on the Pi, find the job, and choose Applied manually. '
+             'This records your application and stops automatic retries. Jobs with uncertain submission records need reconciliation first.\n'
+             'Open Application desk on the Pi: http://127.0.0.1:8766 (through Raspberry Pi Connect).\n')
     enabled = store.settings()['gmail_reports']
     with store.transaction():
         store.db.execute('INSERT OR IGNORE INTO report_outbox VALUES(?,?,?,?,?,?,?,0,NULL,NULL,NULL)',
