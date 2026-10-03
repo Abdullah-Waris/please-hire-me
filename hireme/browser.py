@@ -223,7 +223,9 @@ class Browser:
                 and urlsplit(request.url).hostname=='jobs.ashbyhq.com'
                 and urlsplit(request.url).path=='/api/non-user-graphql' and 200<=response.status<300):
             try:
-                query=json.loads(request.post_data or '{}');result=response.json()
+                query=json.loads(request.post_data or '{}')
+                if not isinstance(query,dict) or query.get('operationName') not in ('ApiCreateFileUploadHandle','ApiSetFormValueToFile'):return
+                result=response.json()
                 variables=query.get('variables',{})
                 if query.get('operationName')=='ApiCreateFileUploadHandle':
                     h=next((h for h in self.upload_payloads if variables.get('filename')==h+'.pdf'),None)
@@ -233,7 +235,7 @@ class Browser:
                     h=self.ashby_file_handles.get(variables.get('fileHandle'))
                     if h in self.uploaded_files and not result.get('errors') and result.get('data',{}).get('setFormValueToFile'):
                         self.ashby_attached_files.add(h)
-            except (ValueError,TypeError,AttributeError):pass
+            except Exception:pass  # Late responses may arrive while the context closes.
         if request.method!='POST' or urlsplit(request.url).hostname not in UPLOAD_HOSTS or not 200<=response.status<300:return
         payload=request.post_data_buffer or b''
         for h,data in self.upload_payloads.items():
@@ -263,6 +265,17 @@ class Browser:
         if LOGIN.search(text) and not (allow_verification and self._email_verification(text)):raise Blocked("account_or_verification_blocked")
         if REFUSE.search(text):raise Blocked("human_work_sample")
         return text
+
+    def _wait_submission_outcome(self,job,accept_verification=True):
+        # ATS processing routinely exceeds one second, especially on the Pi.
+        deadline=time.monotonic()+45
+        while True:
+            text=self._guard(job,allow_verification=True)
+            if CONFIRMED.search(text) and not self.page.locator('input[type=email]').count():return text
+            if accept_verification and self._email_verification(text):return text
+            if self.page.locator('[aria-invalid=true]').count():return text
+            if time.monotonic()>=deadline:return text
+            self.page.wait_for_timeout(500)
 
     def _email_verification(self, text):
         return bool(re.search(r'verification code was sent.{0,300}to submit your application',text,re.I|re.S)
@@ -304,8 +317,7 @@ class Browser:
         self.store.checkpoint()
         self.store.begin_verification(self.aid)
         submit.click(timeout=15000)
-        self.page.wait_for_timeout(1200)
-        text=self._guard(job,allow_verification=True)
+        text=self._wait_submission_outcome(job,accept_verification=False)
         screenshot=self.store.root/'screenshots'/(self.aid+'-verified.jpg')
         # A rejected code may remain visible. Do not persist it in screenshots/text.
         screenshot_kwargs={'mask':[control]} if control.count() else {}
@@ -561,8 +573,7 @@ class Browser:
             requested=time.time()
             try:
                 submit.click(timeout=15000)
-                self.page.wait_for_timeout(1200)
-                text=self._guard(job,allow_verification=True)
+                text=self._wait_submission_outcome(job)
                 screenshot=self.store.root/'screenshots'/(self.aid+'-after.jpg')
                 self.page.screenshot(path=str(screenshot),type='jpeg',full_page=True)
                 confirmed=CONFIRMED.search(text) and not self.page.locator('input[type=email]').count()

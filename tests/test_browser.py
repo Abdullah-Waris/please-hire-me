@@ -577,3 +577,11 @@ def test_ashby_yesno_buttons_preserve_required_question_and_confirmed_answer(sto
         assert b.apply(local_job(store,ats),live=False)=='prepared'
         f=next(f for f in b._snapshot() if f['type']=='yesno')
         assert f['required'] and f['value']=='Yes' and f['options']==['Yes','No']
+
+
+def test_submission_waits_for_delayed_ats_confirmation(store,ats):
+    with Browser(store,test_url=ats[0]) as b:
+        b.page.goto(ats[0]);b.current_host='127.0.0.1';b.attempted=True
+        b.page.evaluate("setTimeout(()=>{document.body.innerHTML='Thank you for applying. Your application has been received.'},2500)")
+        text=b._wait_submission_outcome(local_job(store,ats))
+        assert 'received' in text
