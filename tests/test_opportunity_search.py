@@ -93,6 +93,36 @@ def test_search_deadline_skips_remaining_sources(store, monkeypatch):
     assert result['time_limit_reached']
 
 
+def test_search_summary_counts_latest_result_once_per_source_and_keeps_jobs(store, job, monkeypatch):
+    from hireme.discovery import source_result
+    def collect(store, net):
+        source_result(store, 'fixture:empty', [])
+        source_result(store, 'fixture:partial', [job])
+        source_result(store, 'fixture:partial', error='Later page failed')
+        source_result(store, 'fixture:recovered', error='First attempt failed')
+        source_result(store, 'fixture:recovered', [])
+    fixture_sweeps(monkeypatch, collect)
+    result = opportunity_search.find_opportunities(store, Path('.'))
+    assert result['sources_checked'] == 3 and result['sources_failed'] == 1
+    assert result['added'] == 0 and store.db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0] == 1
+    assert store.discovery_results is None
+    assert json.loads(store.db.execute('SELECT detail FROM runs').fetchone()[0])['sources_failed'] == 1
+
+
+def test_stopped_search_summary_retains_completed_source_checks(store, monkeypatch):
+    from hireme.discovery import source_result
+    def collect(store, net):
+        source_result(store, 'fixture:done', [])
+        store.update_settings({'live_enabled': False})
+        net.checkpoint()
+    fixture_sweeps(monkeypatch, collect)
+    with pytest.raises(Blocked, match='paused'):
+        opportunity_search.find_opportunities(store, Path('.'))
+    detail = json.loads(store.db.execute('SELECT detail FROM runs').fetchone()[0])
+    assert detail['sources_checked'] == 1 and detail['sources_failed'] == 0
+    assert store.discovery_results is None
+
+
 @pytest.mark.parametrize('deadline', [0, -1, True, 1801, '300'])
 def test_search_validates_time_limit(store, deadline):
     with pytest.raises(ValueError):

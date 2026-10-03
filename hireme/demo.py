@@ -6,7 +6,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from .discovery import posting
+from .discovery import posting, source_result
 from .store import Store
 from .util import now
 
@@ -21,7 +21,8 @@ DEMO_READINESS = {
 def seed(store):
     store.update_settings({'onboarding_complete': True, 'live_enabled': False, 'timezone': 'America/New_York',
                            'target_per_day': 12, 'max_per_day': 20, 'target_per_cycle': 3,
-                           'max_per_cycle': 5, 'provider': 'codex-cli'})
+                           'max_per_cycle': 5, 'provider': 'codex-cli',
+                           'company_aliases': {'Cedar Labs Inc': 'Cedar Labs'}})
     entries = [
         ('Cedar Labs', 'Software Engineer Intern', 'New York, NY', 'confirmed', 92, ''),
         ('Meridian', 'New Grad Software Engineer', 'Remote (US)', 'confirmed', 87, ''),
@@ -61,6 +62,14 @@ def seed(store):
                          'outcomes': {'confirmed': 2, 'blocked': 1}, 'reason': 'Sample batch. No applications were sent.'})))
     store.db.execute('INSERT INTO employer_accounts VALUES(?,?,?,?,?)',
                      ('demo-account', 'https://jobs.lever.co', 'Openwater', 'uncertain', stamp))
+    source_result(store, 'ash:synthetic-preview', [])
+    source_result(store, 'simplify:new-grad', error='Sample source temporarily unavailable. No live source was checked.')
+    search_start = (datetime.now(timezone.utc) - timedelta(minutes=45)).isoformat(timespec='seconds')
+    search_end = (datetime.now(timezone.utc) - timedelta(minutes=42)).isoformat(timespec='seconds')
+    store.db.execute('INSERT INTO runs VALUES(?,?,?,?,?,?)',
+                     ('demo-discovery', search_start, search_end, 'finished', 0,
+                      json.dumps({'mode': 'discovery', 'added': 2, 'sources_checked': 2, 'sources_failed': 1,
+                                  'time_limit_reached': False, 'reason': 'Sample search. No live sources were contacted.'})))
 
 
 def run(repo: Path, port=8767, open_browser=False):

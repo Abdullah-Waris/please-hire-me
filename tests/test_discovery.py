@@ -55,6 +55,7 @@ def test_paused_network_does_not_open_any_request(monkeypatch):
 def test_discovery_retry_cannot_send_after_deadline(monkeypatch):
     import urllib.error
     from hireme import net
+    monkeypatch.setattr(net, 'public_host', lambda host: True)
     clock = [9]
     monkeypatch.setattr(net.time, 'monotonic', lambda: clock[0])
     monkeypatch.setattr(net.time, 'sleep', lambda seconds: clock.__setitem__(0, clock[0] + seconds))

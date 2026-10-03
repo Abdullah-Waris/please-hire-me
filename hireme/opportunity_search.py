@@ -21,6 +21,7 @@ def find_opportunities(store, repo, deadline_seconds=300, requested_generation=N
         if any(_unfinished(store).values()):
             raise Blocked('recovery_needed', 'Recover interrupted work before finding opportunities')
         store.discovery_generation = store.control_generation() if requested_generation is None else requested_generation
+        results = {}; store.discovery_results = results
         rid = uuid.uuid4().hex
         before = store.db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0]
         deadline = time.monotonic() + deadline_seconds
@@ -39,6 +40,7 @@ def find_opportunities(store, repo, deadline_seconds=300, requested_generation=N
             store.checkpoint()
             added = store.db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0] - before
             detail = {'mode': 'discovery', 'added': added, 'submissions': 0,
+                      'sources_checked': len(results), 'sources_failed': sum(status == 'error' for status in results.values()),
                       'time_limit_reached': time.monotonic() >= deadline}
             store.db.execute("UPDATE runs SET finished=?,status='finished',submitted=0,detail=? WHERE id=?",
                              (now(), json.dumps(detail), rid))
@@ -46,9 +48,11 @@ def find_opportunities(store, repo, deadline_seconds=300, requested_generation=N
         except Exception as error:
             status = 'paused' if isinstance(error, Blocked) and error.reason == 'paused' else 'blocked'
             added = store.db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0] - before
-            detail = {'mode': 'discovery', 'reason': str(error), 'added': added, 'submissions': 0}
+            detail = {'mode': 'discovery', 'reason': str(error), 'added': added, 'submissions': 0,
+                      'sources_checked': len(results), 'sources_failed': sum(status == 'error' for status in results.values())}
             store.db.execute('UPDATE runs SET finished=?,status=?,submitted=0,detail=? WHERE id=?',
                              (now(), status, json.dumps(detail), rid))
             raise
         finally:
             store.discovery_generation = None
+            store.discovery_results = None

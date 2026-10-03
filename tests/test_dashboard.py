@@ -18,7 +18,10 @@ def launch_discovery_fixture(root, repo, port):
     from hireme import opportunity_search
     from hireme.discovery import posting
     def collect(store, net):
+        from hireme.discovery import source_result
         store.upsert_job(posting('https://jobs.lever.co/acme/search-fixture', 'Acme', 'Engineer', 'US', 'fixture'))
+        source_result(store, 'fixture:healthy', [])
+        source_result(store, 'fixture:unavailable', error='Invented source failure')
         for _ in range(500):
             net.checkpoint()
             if (store.root / 'finish-search').exists(): return
@@ -67,6 +70,7 @@ def test_find_opportunities_and_stop_without_enabling_submissions(tmp_path):
             expect(page.locator('#discover')).to_be_enabled()
             expect(page.locator('#runs')).to_contain_text('Opportunity search')
             expect(page.locator('#runs')).to_contain_text('No submissions')
+            expect(page.locator('#runs')).to_contain_text('2 sources checked · 1 unavailable')
             assert not store.settings()['live_enabled']
             assert store.db.execute('SELECT COUNT(*) FROM jobs').fetchone()[0] == 1
             assert store.db.execute('SELECT COUNT(*) FROM model_requests').fetchone()[0] == 0
@@ -425,6 +429,7 @@ def test_demo_is_read_only_and_export_requires_auth(tmp_path):
             page.goto(base + '/#token=fixture-capability')
             expect(page.locator('#demo-banner')).to_be_visible()
             expect(page.locator('#metric-submitted')).to_have_text('2')
+            expect(page.locator('#runs')).to_contain_text('2 sources checked · 1 unavailable')
             expect(page.locator('#run')).to_be_disabled(); expect(page.locator('#pause')).to_be_disabled()
             assert page.locator('#jobs a[href]').count() == 0
             with page.expect_download() as download:

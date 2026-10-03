@@ -1313,7 +1313,7 @@ function renderRuns() {
           .join("; ");
       detail =
         data.mode === "discovery"
-          ? `Opportunity search · ${data.added || 0} new listings · No submissions.${data.time_limit_reached ? " Search time limit reached." : ""} ${reason}`.trim()
+          ? `Opportunity search · ${data.added || 0} new listings${data.sources_checked !== undefined ? ` · ${data.sources_checked} sources checked · ${data.sources_failed || 0} unavailable` : ""} · No submissions.${data.time_limit_reached ? " Search time limit reached." : ""} ${reason}`.trim()
           : `${data.confirmed || 0} submitted · ${data.attempts || 0} attempted. ${outcomes} ${reason}`.trim();
     } catch {}
     row.append(
