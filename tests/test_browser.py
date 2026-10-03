@@ -421,7 +421,7 @@ def test_ashby_autosave_is_suppressed_without_blocking_local_form(store,monkeypa
     r.request.post_data=json.dumps({'operationName':'SubmitApplication','query':'mutation SubmitApplication { submitApplication { id } }'})
     b._route(r)
     assert r.action=='abort' and b.denied_write
-    assert b.denied_request=={'host':'jobs.ashbyhq.com','path':'/api/non-user-graphql','method':'POST'}
+    assert b.denied_request=={'host':'jobs.ashbyhq.com','path':'/api/non-user-graphql','method':'POST','operation':'SubmitApplication'}
 
 
 def test_ashby_hydration_autosave_does_not_prevent_preparing_form(store,monkeypatch):
@@ -462,3 +462,41 @@ def test_greenhouse_checkbox_choices_keep_question_and_choose_only_one(store,ats
         assert not b.page.locator('#auth-no').is_checked()
         groups=[f for f in b._snapshot() if f['type']=='checkbox-group']
         assert len(groups)==1 and groups[0]['value']=='Yes'
+
+
+def test_ashby_checkbox_fieldset_retains_question_and_independent_option_names(store,ats):
+    store.put_facts({'onsite':'Yes'})
+    store.update_settings({'contextual_preferences':True})
+    job={**local_job(store,ats),'source':'ash:synthetic'}
+    original=(Path(__file__).parent/'fixtures/application.html').read_text()
+    fields=''
+    for title,options in [('Which office are you applying to? (Select both if appropriate)',['San Francisco HQ - 181 Fremont Street','New York City - 1 World Trade']),('How did you hear about Koah?',['LinkedIn','Indeed','Search engine','Other'])]:
+        fields+='<fieldset class="ashby-application-form-input-checkbox-group"><label class="ashby-application-form-question-title _required_test">'+title+'</label>'
+        for i,option in enumerate(options):
+            ident=str(len(fields))+str(i)
+            fields+=f'<label for="{ident}">{option}</label><input type="checkbox" id="{ident}" name="{option}">'
+        fields+='</fieldset>'
+    html=original.replace('</form>',fields+'</form>')
+    with Browser(store,test_url=ats[0]) as b:
+        b.page.route(ats[0]+'/**',lambda r:r.fulfill(status=200,content_type='text/html',body=html) if r.request.method=='GET' else r.fallback())
+        assert b.apply(job,live=False)=='prepared'
+        groups=[f for f in b._snapshot() if f['type']=='checkbox-group']
+        assert [f['value'] for f in groups]==['San Francisco HQ - 181 Fremont Street','Other']
+        assert all(f['required'] for f in groups)
+
+
+def test_batched_ashby_autosave_is_aborted_but_submission_batch_stays_blocked(store,monkeypatch):
+    monkeypatch.setattr('hireme.browser.public_host',lambda host:True)
+    b=Browser(store);b.current_host='jobs.ashbyhq.com'
+    class Request:
+        url='https://jobs.ashbyhq.com/api/non-user-graphql';method='POST'
+        post_data=json.dumps([{'operationName':'ApiSetFormValue','query':'mutation ApiSetFormValue { setFormValue { id } }'}, {'operationName':'Read','query':'query Read { id }'}])
+    class Route:
+        request=Request();action=None
+        def abort(self):self.action='abort'
+        def continue_(self):self.action='continue'
+    route=Route();b._route(route)
+    assert route.action=='abort' and not b.denied_write
+    route.request.post_data=json.dumps([{'operationName':'Submit','query':'mutation Submit { submit { id } }'}])
+    b._route(route)
+    assert b.denied_write and b.denied_request['operations']==['Submit']

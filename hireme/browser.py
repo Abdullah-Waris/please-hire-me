@@ -47,13 +47,16 @@ SNAPSHOT=r"""selector => {
    else if(/resume|\bcv\b/.test(identity))question='Resume/CV';
    else if(/cover.?letter/.test(identity))question='Cover letter';
   }
-  const checkboxGroup=type==='checkbox' && el.name && el.getAttribute('description') && controls.filter(x=>x.type==='checkbox'&&x.name===el.name&&x.getAttribute('description')===el.getAttribute('description')).length>1;
+  const ashbyGroup=type==='checkbox' ? el.closest('fieldset.ashby-application-form-input-checkbox-group') : null;
+  const checkboxGroup=ashbyGroup || type==='checkbox' && el.name && el.getAttribute('description') && controls.filter(x=>x.type==='checkbox'&&x.name===el.name&&x.getAttribute('description')===el.getAttribute('description')).length>1;
   if(type==='radio'||checkboxGroup){
-   const name=el.name; if(!name||seen.has(name))return;seen.add(name);
-   const group=controls.filter(x=>x.type===el.type&&x.name===name);
+   const name=ashbyGroup||el.name; if(!name||seen.has(name))return;seen.add(name);
+   const group=controls.filter(x=>x.type===el.type&&(ashbyGroup?x.closest('fieldset.ashby-application-form-input-checkbox-group')===ashbyGroup:x.name===name));
    if(checkboxGroup)type='checkbox-group';
    indices=group.map(x=>controls.indexOf(x)); options=group.map(x=>Array.from(x.labels||[]).map(l=>l.innerText).join(' ').trim()||x.value);
-   const parent=el.closest('fieldset'); question=el.getAttribute('description')||parent?.querySelector('legend')?.innerText||el.closest('[class*=field],[class*=question]')?.querySelector('label')?.innerText||question;
+   const parent=el.closest('fieldset');
+   if(ashbyGroup)required=required||!!ashbyGroup.querySelector('label[class*=_required_]');
+   question=ashbyGroup?.querySelector('.ashby-application-form-question-title')?.innerText||el.getAttribute('description')||parent?.querySelector('legend')?.innerText||el.closest('[class*=field],[class*=question]')?.querySelector('label')?.innerText||question;
    value=group.filter(x=>x.checked).map(x=>Array.from(x.labels||[]).map(l=>l.innerText).join(' ').trim()||x.value).join('; ');
   }else if(type==='select'){options=Array.from(el.options).filter(o=>o.value&&!o.disabled).map(o=>o.textContent.trim())}
   else if(type==='checkbox'){options=['Yes','No'];value=el.checked?'Yes':'No'}
@@ -169,11 +172,14 @@ class Browser:
                     # local control values are still verified before final submit.
                     autosave=(host==self.current_host=='jobs.ashbyhq.com'
                               and p.path=='/api/non-user-graphql'
-                              and isinstance(data,dict)
-                              and data.get('operationName')=='ApiSetFormValue'
-                              and isinstance(data.get('query'),str)
-                              and re.match(r'^\s*mutation\s+ApiSetFormValue\b',data['query']))
+                              and bool(queries if isinstance(data,(dict,list)) else [])
+                              and all(isinstance(q,dict) and (
+                                  isinstance(q.get('query'),str) and re.match(r'^\s*query\b',q['query']) or
+                                  q.get('operationName')=='ApiSetFormValue' and isinstance(q.get('query'),str) and re.match(r'^\s*mutation\s+ApiSetFormValue\b',q['query'])
+                              ) for q in queries))
                     detail={'host':host,'path':p.path,'method':route.request.method}
+                    if isinstance(data,dict):detail['operation']=str(data.get('operationName',''))[:100]
+                    elif isinstance(data,list):detail['operations']=[str(x.get('operationName',''))[:100] for x in data if isinstance(x,dict)]
                     if autosave:
                         self.store.event('draft_autosave_suppressed',None,detail)
                     else:
@@ -219,7 +225,9 @@ class Browser:
                     and self.page.get_by_label('Security code',exact=True).count())
 
     def _continue_email_verification(self,job,submit):
-        if not self.store.settings()['gmail_verification']:return 'awaiting_verification'
+        if not self.store.settings()['gmail_verification']:
+            self.store.event('verification_held',self.aid,{'reason':'gmail_verification_disabled'})
+            return 'awaiting_verification'
         greenhouse={'boards.greenhouse.io','job-boards.greenhouse.io','boards.eu.greenhouse.io','job-boards.eu.greenhouse.io'}
         if not self.test_url and job['host'] not in greenhouse:return 'awaiting_verification'
         from .gmail import GmailClient
