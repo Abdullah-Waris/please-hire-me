@@ -534,6 +534,9 @@ def test_ashby_s3_upload_requires_approved_bytes_and_exact_destination(store,mon
         def abort(self):self.action='abort'
         def continue_(self):self.action='continue'
     route=Route();b._route(route);assert route.action=='continue'
+    # Chromium omits multipart file bytes from the intercepted request body.
+    route.request.post_data_buffer=b'filename=approved.pdf; signed form fields'
+    b._route(route);assert route.action=='continue'
     route.request.post_data_buffer=b'unapproved';b._route(route);assert route.action=='abort'
     route.request.url='https://'+ASHBY_UPLOAD_HOST+'.attacker.invalid/'
     route.request.post_data_buffer=b'approved-pdf-content';b._route(route);assert route.action=='abort'

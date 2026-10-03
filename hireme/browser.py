@@ -133,7 +133,7 @@ class Browser:
             payload=getattr(route.request,'post_data_buffer',None) or b''
             approved=self.current_host in {'boards.greenhouse.io','job-boards.greenhouse.io','boards.eu.greenhouse.io','job-boards.eu.greenhouse.io'} and route.request.method=='POST' and any(data in payload or h.encode() in payload for h,data in self.upload_payloads.items())
             approved=approved or (host==ASHBY_UPLOAD_HOST and self.current_host=='jobs.ashbyhq.com'
-                                  and route.request.method=='POST' and any(data in payload for data in self.upload_payloads.values()))
+                                  and route.request.method=='POST' and any(data in payload or (h+'.pdf').encode() in payload for h,data in self.upload_payloads.items()))
             return route.continue_() if approved else route.abort()
         # No arbitrary website can receive personal values through an injected pixel or redirect.
         asset_hosts={"www.google.com","www.gstatic.com","fonts.googleapis.com","fonts.gstatic.com",
