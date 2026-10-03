@@ -18,10 +18,11 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,
     with worker_lock(store.root):
         store.recover()
         store.run_generation=store.control_generation() if live else None
+        store.preparation_generation=store.control_generation() if not live else None
         rid=uuid.uuid4().hex; s=store.settings(); count=0; attempts=0; reasons={}; outcomes={}; start=time.monotonic()
         store.active_run_id=rid
         max_attempts=min(max_attempts or s['max_attempts_per_cycle'],s['max_attempts_per_cycle'])
-        store.db.execute("INSERT INTO runs(id,started,status) VALUES(?,?,'running')",(rid,now()))
+        store.db.execute("INSERT INTO runs(id,started,status,detail) VALUES(?,?,'running',?)",(rid,now(),json.dumps({'mode':'live' if live else 'prepare'})))
         try:
             if store.missing_setup() or not s['onboarding_complete']:
                 raise Blocked('setup_incomplete',', '.join(store.missing_setup()))
@@ -75,16 +76,18 @@ def cycle(store,repo,discover=True,live=True,limit=None,browser_factory=Browser,
                                 store.event('application_finished',job['id'],{'run_id':rid,'outcome':'error','error':type(e).__name__,'detail':str(e)[:1200]})
                                 reasons['browser_error']=reasons.get('browser_error',0)+1
                                 store.block(job['id'],'browser_error',type(e).__name__)
-            detail=json.dumps({'target':target,'attempts':attempts,'outcomes':outcomes,'confirmed':count,'shortfall':max(0,target-count),'reasons':reasons,'mode':'live' if live else 'prepare'})
+            store.checkpoint()
+            detail=json.dumps({'target':target,'attempts':attempts,'outcomes':outcomes,'confirmed':count,'prepared':count if not live else 0,'shortfall':max(0,target-count),'reasons':reasons,'mode':'live' if live else 'prepare'})
             store.db.execute("UPDATE runs SET finished=?,status='finished',submitted=?,detail=? WHERE id=?",(now(),count if live else 0,detail,rid))
             return json.loads(detail)
         except Exception as e:
             store.recover()
             status='paused' if isinstance(e,Blocked) and e.reason=='paused' else 'blocked'
-            store.db.execute("UPDATE runs SET finished=?,status=?,submitted=?,detail=? WHERE id=?",(now(),status,count if live else 0,json.dumps({'confirmed':count if live else 0,'attempts':attempts,'reason':str(e),'mode':'live' if live else 'prepare'}),rid))
+            store.db.execute("UPDATE runs SET finished=?,status=?,submitted=?,detail=? WHERE id=?",(now(),status,count if live else 0,json.dumps({'confirmed':count if live else 0,'prepared':count if not live else 0,'attempts':attempts,'reason':str(e),'mode':'live' if live else 'prepare'}),rid))
             raise
         finally:
             store.run_generation=None
+            store.preparation_generation=None
             store.active_run_id=None
             try:
                 from .reports import queue_report,flush_reports

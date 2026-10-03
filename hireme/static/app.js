@@ -1681,7 +1681,7 @@ function runRow(run) {
       data.mode === "discovery"
         ? `Opportunity search · ${data.added || 0} new listings${data.sources_checked !== undefined ? ` · ${data.sources_checked} sources checked · ${data.sources_failed || 0} unavailable` : ""} · No submissions.${data.time_limit_reached ? " Search time limit reached." : ""} ${reason}`.trim()
         : data.mode === "prepare"
-          ? `Preparation batch · ${data.confirmed || 0} prepared · ${data.attempts || 0} attempted · No submissions. ${outcomes} ${reason}`.trim()
+          ? `Preparation batch · ${data.prepared ?? data.confirmed ?? 0} prepared · ${data.attempts || 0} attempted · No submissions. ${outcomes} ${reason}`.trim()
           : `${run.submitted ?? data.confirmed ?? 0} submitted · ${data.attempts || 0} attempted. ${outcomes} ${reason}`.trim();
   } catch {}
   if (run.model_requests_used !== undefined)
@@ -1826,9 +1826,11 @@ function render() {
     : state.worker_running
       ? state.worker_mode === "discovery"
         ? "Finding opportunities…"
-        : state.settings.live_enabled
-          ? "Batch running"
-          : "Pausing active batch…"
+        : state.worker_mode === "prepare"
+          ? "Preparing applications…"
+          : state.settings.live_enabled
+            ? "Batch running"
+            : "Pausing active batch…"
       : state.worker_recovery?.recovery_needed
         ? "Recovery needed"
         : !state.settings.onboarding_complete || state.missing_setup.length > 0
@@ -1837,14 +1839,18 @@ function render() {
             ? "Automatic submissions enabled"
             : "Submissions paused";
   const finding = state.worker_running && state.worker_mode === "discovery";
+  const preparing = state.worker_running && state.worker_mode === "prepare";
   $("#pause").textContent = finding
     ? "Stop search & pause"
-    : state.settings.live_enabled
-      ? "Pause"
-      : "Resume";
+    : preparing
+      ? "Stop preparation & pause"
+      : state.settings.live_enabled
+        ? "Pause"
+        : "Resume";
   $("#pause").disabled =
     state.demo ||
     (!finding &&
+      !preparing &&
       !state.settings.live_enabled &&
       (!state.settings.onboarding_complete || state.missing_setup.length > 0));
   $("#discover").disabled =
@@ -2021,7 +2027,8 @@ $("#pause").onclick = async () => {
   try {
     await api(
       state.settings.live_enabled ||
-        (state.worker_running && state.worker_mode === "discovery")
+        (state.worker_running &&
+          ["discovery", "prepare"].includes(state.worker_mode))
         ? "/api/pause"
         : "/api/resume-worker",
       {},

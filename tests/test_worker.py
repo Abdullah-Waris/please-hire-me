@@ -68,3 +68,52 @@ def test_observed_cycle_has_hard_attempt_limit_and_job_selection(store,job):
         def apply(self,j,live=True):visited.append(j['id']);raise Blocked('missing_answers')
     result=cycle(store,Path('.'),discover=False,max_attempts=2,job_ids=set(selected[:2]),browser_factory=FakeBrowser)
     assert result['attempts']==2 and set(visited)==set(selected[:2]) and result['confirmed']==0
+
+
+def test_preparation_can_start_paused_without_enabling_submissions(store, job, package):
+    store.update_settings({'live_enabled': False})
+    class FakeBrowser:
+        def __init__(self, s): self.s = s
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def apply(self, selected, live=True):
+            assert not live
+            self.s.checkpoint(); self.s.prepare(selected, package)
+            return 'prepared'
+    result = cycle(store, Path('.'), discover=False, live=False, limit=1, browser_factory=FakeBrowser)
+    assert result['prepared'] == 1
+    assert not store.settings()['live_enabled'] and store.preparation_generation is None
+    row = store.db.execute('SELECT * FROM runs').fetchone()
+    assert row['submitted'] == 0 and json.loads(row['detail'])['mode'] == 'prepare'
+    assert store.db.execute('SELECT state FROM applications').fetchone()[0] == 'prepared'
+
+
+@pytest.mark.parametrize('limit', [1, 2])
+def test_pause_during_preparation_preserves_prepared_count_and_stops_future_work(store, job, package, limit):
+    store.update_settings({'live_enabled': False})
+    second = {**job, 'id': digest('second-preparation'), 'url': job['url'] + '-second', 'company': 'Other Company'}
+    store.upsert_job(second)
+    visited = []
+    class FakeBrowser:
+        def __init__(self, s): self.s = s
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def apply(self, selected, live=True):
+            visited.append(selected['id'])
+            self.s.prepare(selected, {**package, 'job_id': selected['id'], 'url': selected['url']})
+            self.s.update_settings({'live_enabled': False})
+            return 'prepared'
+    with pytest.raises(Blocked, match='paused'):
+        cycle(store, Path('.'), discover=False, live=False, limit=limit, browser_factory=FakeBrowser)
+    row = store.db.execute('SELECT * FROM runs').fetchone(); detail = json.loads(row['detail'])
+    assert len(visited) == 1 and row['status'] == 'paused' and row['submitted'] == 0
+    assert detail['prepared'] == 1 and detail['confirmed'] == 0
+    assert store.db.execute("SELECT COUNT(*) FROM applications WHERE state='prepared'").fetchone()[0] == 1
+    assert not store.settings()['live_enabled'] and store.preparation_generation is None
+
+
+def test_resume_cannot_revive_cancelled_preparation_or_reserve_another_request(store):
+    store.preparation_generation = store.control_generation()
+    store.update_settings({'live_enabled': False}); store.update_settings({'live_enabled': True})
+    with pytest.raises(Blocked, match='paused'): store.reserve_model_request()
+    assert store.db.execute('SELECT COUNT(*) FROM model_requests').fetchone()[0] == 0

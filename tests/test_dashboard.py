@@ -32,6 +32,64 @@ def launch_discovery_fixture(root, repo, port):
     launch(root, repo, port)
 
 
+def launch_preparation_fixture(root, repo, port):
+    import threading
+    from hireme import worker
+    from hireme.store import Store
+    from hireme.util import Blocked
+    entered = threading.Event()
+    worker.eligible = lambda *args: (100, {})
+    class FakeBrowser:
+        def __init__(self, store): self.store = store
+        def __enter__(self): return self
+        def __exit__(self, *args): pass
+        def apply(self, job, live=True):
+            assert not live
+            entered.set()
+            for _ in range(500):
+                self.store.checkpoint(); time.sleep(.01)
+            return 'prepared'
+    def run():
+        store = Store(Path(root))
+        try: worker.cycle(store, Path(repo), discover=False, live=False, browser_factory=FakeBrowser)
+        except Blocked: pass
+        finally: store.close()
+    threading.Thread(target=run, daemon=True).start()
+    entered.wait(3)
+    launch(root, repo, port)
+
+
+def test_dashboard_stops_preparation_without_resuming_submissions(store, job):
+    from playwright.sync_api import sync_playwright, expect
+    store.update_settings({'live_enabled': False})
+    sock = socket.socket(); sock.bind(('127.0.0.1', 0)); port = sock.getsockname()[1]; sock.close()
+    process = multiprocessing.Process(target=launch_preparation_fixture, args=(str(store.root), str(Path.cwd()), port)); process.start()
+    base = f'http://127.0.0.1:{port}'
+    try:
+        for _ in range(50):
+            try: urllib.request.urlopen(base).close(); break
+            except OSError: time.sleep(.1)
+        with sync_playwright() as p:
+            browser = p.chromium.launch(); page = browser.new_page(viewport={'width': 320, 'height': 844}); errors = []
+            page.on('pageerror', lambda error: errors.append(str(error)))
+            page.goto(base + '/#token=fixture-capability')
+            expect(page.locator('#worker-state')).to_have_text('Preparing applications…')
+            expect(page.locator('#pause')).to_have_text('Stop preparation & pause')
+            expect(page.locator('#pause')).to_be_enabled(); expect(page.locator('#run')).to_be_disabled()
+            page.locator('#pause').click(); page.evaluate('refresh()')
+            expect(page.locator('#worker-state')).to_have_text('Submissions paused')
+            expect(page.locator('#pause')).to_have_text('Resume')
+            assert not store.settings()['live_enabled']
+            run = store.db.execute('SELECT * FROM runs').fetchone()
+            assert run['status'] == 'paused' and run['submitted'] == 0
+            assert json.loads(run['detail'])['mode'] == 'prepare'
+            assert not store.db.execute('SELECT * FROM applications').fetchone()
+            assert not store.db.execute('SELECT * FROM model_requests').fetchone()
+            assert not errors and page.evaluate('document.documentElement.scrollWidth <= innerWidth')
+            browser.close()
+    finally: process.terminate(); process.join(5)
+
+
 def test_find_opportunities_and_stop_without_enabling_submissions(tmp_path):
     from playwright.sync_api import sync_playwright, expect
     from hireme.store import Store
