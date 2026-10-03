@@ -84,13 +84,11 @@ def _resume_internship(store, label):
     if not re.search(r'(?:prior|previous|past).*(?:internship|co.op).*(?:experience)|(?:have|completed).*(?:internship|co.op)',label,re.I):return None
     doc=store.db.execute("SELECT * FROM documents WHERE kind='resume'").fetchone()
     if not doc:return None
-    from .util import safe_document
-    import hashlib
-    from pypdf import PdfReader
-    path=safe_document(store.root/'documents'/doc['filename'],store.root/'documents')
-    if hashlib.sha256(path.read_bytes()).hexdigest()!=doc['hash']:raise Blocked('document_tampered')
-    try:text='\n'.join(p.extract_text() or '' for p in PdfReader(path).pages)
+    from .onboarding import selected_resume_text
+    try:source=selected_resume_text(store)
+    except ValueError as error:raise Blocked('document_tampered',str(error)) from None
     except Exception:return None
+    text=source['text']
     section=re.split(r'\b(?:WORK )?EXPERIENCE\b',text,flags=re.I)
     if len(section)<2:return None
     work=re.split(r'(?m)^(?:PROJECTS|EDUCATION|SKILLS|PUBLICATIONS)\s*$',section[1],maxsplit=1)[0]
@@ -101,7 +99,7 @@ def _resume_internship(store, label):
         if re.search(r'\b(?:intern|internship)\b',line,re.I):
             dates=re.findall(r'\b(0[1-9]|1[0-2])/(20\d{2})\b',' '.join(lines[max(0,i-1):i+3]))
             if dates and min(y+'-'+m for m,y in dates)<=month:
-                return {'value':'Yes','provenance':{'resume_hash':doc['hash'],'resume_quote':line.strip()}}
+                return {'value':'Yes','provenance':{'resume_hash':source['hash'],'resume_quote':line.strip()}}
     return None
 
 

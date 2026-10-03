@@ -26,6 +26,44 @@ def _read_pdf_bytes(path):
     return data
 
 
+def _pdf_text(data,kind='resume'):
+    if not data.startswith(b'%PDF-'):raise ValueError('Not a PDF')
+    from pypdf import PdfReader
+    reader=PdfReader(io.BytesIO(data))
+    if reader.is_encrypted or len(reader.pages)>50:raise ValueError('Encrypted or excessive PDF')
+    parts=[];length=0
+    for page in reader.pages:
+        part=page.extract_text() or '';length+=len(part)
+        if length>100000:raise ValueError('PDF text exceeds 100,000 characters')
+        parts.append(part)
+    text='\n'.join(parts)
+    if kind=='resume' and not text.strip():raise ValueError('Resume needs selectable text; supply an accessible text PDF')
+    return text
+
+
+def _selected_resume_bytes(store):
+    doc=store.db.execute("SELECT hash,filename FROM documents WHERE kind='resume'").fetchone()
+    if not doc or not isinstance(doc['hash'],str) or not re.fullmatch(r'[a-f0-9]{64}',doc['hash']) or doc['filename']!=doc['hash']+'.pdf':
+        raise ValueError('Import a readable resume first')
+    directory=store.root/'documents'
+    if directory.is_symlink():raise ValueError('Unsafe resume storage directory')
+    data=_read_pdf_bytes(directory/doc['filename'])
+    if hashlib.sha256(data).hexdigest()!=doc['hash']:raise ValueError('Stored resume changed. Reimport the matching original PDF.')
+    return dict(doc),data
+
+
+def selected_resume_text(store):
+    doc,data=_selected_resume_bytes(store)
+    return {'hash':doc['hash'],'text':_pdf_text(data)}
+
+
+def _changed_candidates(store,candidates):
+    known=store.facts(False)
+    values={key:validate_fact(key,value) for key,value in candidates.items()}
+    return {key:value for key,value in values.items()
+            if not (known.get(key,{}).get('confirmed') and known[key]['value']==value)}
+
+
 def _store_imported_pdf(path,data):
     """An explicit import can restore the bytes belonging to a hash-named PDF."""
     if path.name!=hashlib.sha256(data).hexdigest()+'.pdf' or path.is_symlink():raise ValueError('Unsafe imported PDF destination')
@@ -57,17 +95,7 @@ def _store_imported_pdf(path,data):
 def import_resume(store,path:Path,kind='resume'):
     if kind not in ('resume','transcript'):raise ValueError('Unsupported document kind')
     data=_read_pdf_bytes(path)
-    if not data.startswith(b'%PDF-'):raise ValueError('Not a PDF')
-    from pypdf import PdfReader
-    reader=PdfReader(io.BytesIO(data))
-    if reader.is_encrypted or len(reader.pages)>50:raise ValueError('Encrypted or excessive PDF')
-    parts=[];length=0
-    for page in reader.pages:
-        part=page.extract_text() or '';length+=len(part)
-        if length>100000:raise ValueError('PDF text exceeds 100,000 characters')
-        parts.append(part)
-    text='\n'.join(parts)
-    if kind=='resume' and not text.strip():raise ValueError('Resume needs selectable text; supply an accessible text PDF')
+    text=_pdf_text(data,kind)
     h=hashlib.sha256(data).hexdigest()
     candidates={}
     if kind=='resume':
@@ -101,10 +129,7 @@ def import_resume(store,path:Path,kind='resume'):
         p=store.root/'config'/'resume.txt'
         if p.is_symlink():raise ValueError('Unsafe resume text destination')
     with store.transaction():
-        known=store.facts(False)
-        proposals={key:validate_fact(key,value) for key,value in candidates.items()}
-        proposals={key:value for key,value in proposals.items()
-                   if not (known.get(key,{}).get('confirmed') and known[key]['value']==value)}
+        proposals=_changed_candidates(store,candidates)
         # Exact existing confirmations remain authoritative. New/changed values
         # require review; identity rejection precedes selecting the new PDF.
         if proposals:store.put_facts(proposals,source='resume:'+h,confirmed=False)
@@ -124,15 +149,21 @@ def import_resume(store,path:Path,kind='resume'):
 
 
 def model_candidates(store,provider):
-    path=store.root/'config'/'resume.txt'
-    if not path.is_file():raise ValueError('Import a resume first')
-    text=path.read_text();result=provider.extract_resume(text);values={}
+    source=selected_resume_text(store)
+    text=source['text'];result=provider.extract_resume(text);values={}
+    if not isinstance(result,dict) or not isinstance(result.get('facts',[]),list):raise ValueError('Resume extraction returned an invalid facts list')
     forbidden={'work_authorized_us','needs_sponsorship','citizenship','us_person','unrestricted_authorization','race','gender','veteran','disability','professional_years','earliest_start','latest_start'}
     for f in result.get('facts',[]):
+        if not isinstance(f,dict):continue
         key,value,quote=f.get('key'),f.get('value'),f.get('quote')
-        if key not in FACTS or key in forbidden or not isinstance(quote,str) or not quote.strip() or quote not in text:continue
+        if not isinstance(key,str) or key not in FACTS or key in forbidden or not isinstance(quote,str) or not quote.strip() or quote not in text:continue
         if not isinstance(value,str) or value not in quote:continue
         try:values[key]=validate_fact(key,value)
         except ValueError:continue
-    store.put_facts(values,source='resume:model-proposal',confirmed=False)
+    with store.transaction():
+        current,_=_selected_resume_bytes(store)
+        if current['hash']!=source['hash']:raise ValueError('The selected resume changed during extraction. Run extraction again.')
+        proposals=_changed_candidates(store,values)
+        if proposals:store.put_facts(proposals,source='resume:'+source['hash']+':model-proposal',confirmed=False)
+    if proposals:store.export_config()
     return values

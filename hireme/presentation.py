@@ -50,6 +50,7 @@ REASON_GUIDANCE = {
     'unsupported_widget': ('An application field needs manual completion', 'Open the official posting and complete its unsupported field yourself.'),
     'multi_step_requires_adapter': ('This application flow needs manual completion', 'Open the official posting to complete the remaining steps yourself.'),
     'browser_error': ('The application browser encountered a problem', 'Review the posting and recorded details. Uncertain submissions stay held.'),
+    'document_tampered': ('Your stored PDF needs attention', 'Reimport the matching original PDF in Your facts to restore its private copy, then review the application before starting another batch.'),
     'provider_unavailable': ('The model connection needs attention', 'Open Model connection and check installation, login, or the saved API key.'),
     'cover_letter_not_enabled': ('A cover letter is required', 'Add reviewed writing sources and enable tailored writing and cover letters in Preferences, or apply manually.'),
     'company_uncertain': ('An earlier company submission is uncertain', 'Verify the earlier outcome before submitting another application to this company.'),
